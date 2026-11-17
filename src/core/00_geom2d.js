@@ -74,6 +74,36 @@ C2B.g2 = (() => {
     return rep;
   }
 
+  /**
+   * Abweichung bei mehreren Teilprofilen: jeder Punkt zählt zum nächstgelegenen Profil.
+   * profiles = [{ vertices, closed }]; liefert Gesamtwerte + segOk/segMax je Profil.
+   */
+  function deviationMulti(P, profiles, tol, band) {
+    band = band || Math.max(5 * tol, 0.10);
+    const valid = profiles.map(p => p.vertices.length >= 2);
+    const per = profiles.map((p, k) => valid[k] ? distancesToPolyline(P, p.vertices, p.closed && p.vertices.length >= 3) : null);
+    const segMax = profiles.map(p => new Array(edgeCount(p.vertices.length, p.closed)).fill(null));
+    const used = [];
+    for (let i = 0; i < P.length; i++) {
+      let best = Infinity, bk = -1;
+      per.forEach((r, k) => { if (r && r.dist[i] < best) { best = r.dist[i]; bk = k; } });
+      if (bk < 0 || best > band) continue;
+      used.push(best);
+      const s = per[bk].seg[i];
+      if (segMax[bk][s] === null || best > segMax[bk][s]) segMax[bk][s] = best;
+    }
+    const rep = { nPoints: P.length, nUsed: used.length, max: null, mean: null, rms: null, p95: null, withinTol: null,
+      segMax, segOk: segMax.map(a => a.map(m => m === null || m <= tol)) };
+    if (!valid.some(Boolean)) return rep;
+    if (!used.length) { rep.withinTol = 0; return rep; }
+    used.sort((a, b) => a - b);
+    let s = 0, s2 = 0, ok = 0;
+    for (const d of used) { s += d; s2 += d * d; if (d <= tol) ok++; }
+    Object.assign(rep, { max: used[used.length - 1], mean: s / used.length, rms: Math.sqrt(s2 / used.length),
+      p95: used[Math.min(used.length - 1, Math.floor(0.95 * used.length))], withinTol: ok / used.length });
+    return rep;
+  }
+
   /** Douglas-Peucker (iterativ) auf geordneter Punktfolge: Indizes der Stützpunkte. */
   function douglasPeucker(P, tol) {
     const n = P.length;
@@ -229,7 +259,7 @@ C2B.g2 = (() => {
     return tris;
   }
 
-  return { edges, edgeCount, distPointSeg, distancesToPolyline, deviationReport, douglasPeucker,
+  return { edges, edgeCount, distPointSeg, distancesToPolyline, deviationReport, deviationMulti, douglasPeucker,
     fitLine, intersectLines, projectOnLine, signedArea, polylineLength, resample, densify,
     rightNormal, triangulate };
 })();

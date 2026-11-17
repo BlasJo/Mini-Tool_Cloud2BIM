@@ -38,8 +38,27 @@ C2B.sec = (() => {
 
   function newSection(origin, angle, station = 0, depth = 0.05, name) {
     return { id: uid(), name: name || ('QS ' + station.toFixed(2)), station, origin: [origin[0], origin[1]],
-      angle, depth, simplify: 0, profile: { vertices: [], closed: true }, components: [] };
+      angle, depth, maxGap: DEFAULT_MAX_GAP, profiles: [] };
   }
+
+  const DEFAULT_MAX_GAP = 0.20;
+
+  /**
+   * Teilprofile eines Querschnitts [{ vertices, closed, components }]. Ältere Projekte
+   * (ein Profil in s.profile, Bauteile in s.components) werden dabei übernommen.
+   */
+  function profilesOf(s) {
+    if (!s.profiles || 'profile' in s) {
+      s.profiles = s.profiles || [];
+      if (s.profile && s.profile.vertices && s.profile.vertices.length) s.profiles.push({ vertices: s.profile.vertices, closed: !!s.profile.closed, components: s.components || [] });
+      delete s.profile; delete s.components;
+    }
+    if (!(s.maxGap > 0)) s.maxGap = DEFAULT_MAX_GAP;
+    s.profiles.forEach(p => { p.components = p.components || []; });
+    return s.profiles;
+  }
+  const allComponents = s => profilesOf(s).reduce((a, p) => a.concat(p.components || []), []);
+  const nVertices = s => profilesOf(s).reduce((a, p) => a + p.vertices.length, 0);
 
   /** Querschnitte entlang einer Achse (Polylinie): Abstand ODER Anzahl. */
   function generateAlongAxis(axis, { spacing = 0, count = 0, depth = 0.05, includeEnd = true, stationStart = 0, prefix = 'QS' } = {}) {
@@ -54,7 +73,9 @@ C2B.sec = (() => {
       st = count === 1 ? [L / 2] : Array.from({ length: count }, (_, k) => L * k / (count - 1));
     } else if (spacing > 0) {
       for (let s = 0; s <= L + 1e-9; s += spacing) st.push(Math.min(s, L));
-      if (includeEnd && L - st[st.length - 1] > 1e-6) st.push(L);
+      // Endquerschnitt nur ergänzen, wenn er nicht (fast) auf dem letzten liegt (< 1 cm)
+      if (includeEnd && L - st[st.length - 1] > 0.01) st.push(L);
+      else if (includeEnd) st[st.length - 1] = L;
     } else throw new Error('Bitte Abstand oder Anzahl angeben.');
     if (st.length > 5000) throw new Error('Zu viele Querschnitte (> 5000).');
     return st.map(s => {
@@ -151,14 +172,36 @@ C2B.sec = (() => {
       comps.push({ members, ext: Math.hypot(mxx - mnx, mxy - mny) });
     }
     const maxExt = Math.max(...comps.map(c => c.ext));
-    const keep = comps.filter(c => c.ext >= minFrac * maxExt);
+    // Kleine Gruppe = Fremdobjekt (Leitung, Gerät) nur, wenn sie das übrige Profil höchstens auf
+    // einer Seite berührt. Ein Wandstück zwischen zwei Lücken berührt beide Seiten und bleibt.
+    const reach = 2 * link, r2 = reach * reach, cs2 = reach;
+    const grid = new Map();
+    P.forEach((p, i) => { const k = key(Math.floor(p[0] / cs2), Math.floor(p[1] / cs2)); if (!grid.has(k)) grid.set(k, []); grid.get(k).push(i); });
+    const bridges = (c, id) => {
+      const contacts = [];
+      for (const i of c.members) {
+        const p = P[i], ix = Math.floor(p[0] / cs2), iy = Math.floor(p[1] / cs2);
+        let hit = false;
+        for (let a = -1; a <= 1 && !hit; a++) for (let b = -1; b <= 1 && !hit; b++) {
+          const l = grid.get(key(ix + a, iy + b)); if (!l) continue;
+          for (const j of l) if (comp[j] !== id && (P[j][0] - p[0]) ** 2 + (P[j][1] - p[1]) ** 2 <= r2) { hit = true; break; }
+        }
+        if (hit) contacts.push(p);
+      }
+      if (contacts.length < 2) return false;
+      let spread = 0;
+      for (let a = 0; a < contacts.length; a += Math.max(1, contacts.length >> 5)) for (let b = a + 1; b < contacts.length; b++)
+        spread = Math.max(spread, Math.hypot(contacts[a][0] - contacts[b][0], contacts[a][1] - contacts[b][1]));
+      return spread >= 0.6 * c.ext;
+    };
+    const keep = comps.filter((c, id) => c.ext >= minFrac * maxExt || bridges(c, id));
     const out = [];
     for (const c of keep) for (const j of c.members) out.push(P[j]);
     return out.length >= 5 ? out : P;
   }
 
   /** Punkte entlang des längsten Pfades im euklidischen Minimal-Spannbaum ordnen. */
-  function orderedPath(P) {
+  function orderedPath(P, maxGap = Infinity) {
     const n = P.length;
     if (n < 4) return { path: P, length: 0 };
     const coords = new Float64Array(n * 2);
@@ -181,6 +224,7 @@ C2B.sec = (() => {
     const find = x => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
     const adj = Array.from({ length: n }, () => []);
     for (const [a, b, w] of E) {
+      if (w > maxGap) break;           // sortiert: alle weiteren Kanten sind länger
       const ra = find(a), rb = find(b);
       if (ra === rb) continue;
       par[ra] = rb;
@@ -198,7 +242,13 @@ C2B.sec = (() => {
       for (let i = 0; i < n; i++) if (dist[i] > dist[bi]) bi = i;
       return { bi, dist, pred };
     };
-    const a = far(0).bi;
+    // Start im grössten zusammenhängenden Teil
+    const cnt = new Map();
+    for (let i = 0; i < n; i++) { const r = find(i); cnt.set(r, (cnt.get(r) || 0) + 1); }
+    let bigRoot = 0, bigN = -1;
+    cnt.forEach((v, k) => { if (v > bigN) { bigN = v; bigRoot = k; } });
+    let start = 0; while (find(start) !== bigRoot) start++;
+    const a = far(start).bi;
     const r = far(a);
     const path = [];
     for (let x = r.bi; x !== -1; x = r.pred[x]) path.push(P[x]);
@@ -261,6 +311,36 @@ C2B.sec = (() => {
   }
 
   /**
+   * Kurze Fasen an Ecken entfernen: eine kurze Kante zwischen zwei längeren wird durch den
+   * Schnittpunkt der Nachbarkanten ersetzt, wenn die Toleranz eingehalten bleibt.
+   */
+  function sharpenCorners(V, closed, P, tol) {
+    let v = V.slice();
+    const near = P.filter((_, i) => g2.distancesToPolyline(P, V, closed).dist[i] <= tol * 1.5);
+    const maxErr = cand => { const d = g2.distancesToPolyline(near, cand, closed).dist; let m = 0; for (const x of d) if (x > m) m = x; return m; };
+    const minLen = Math.max(3 * tol, 0.05);
+    let changed = true;
+    while (changed && v.length > (closed ? 3 : 2)) {
+      changed = false;
+      const n = v.length, ne = g2.edgeCount(n, closed);
+      const len = e => Math.hypot(v[(e + 1) % n][0] - v[e][0], v[(e + 1) % n][1] - v[e][1]);
+      for (let e = 0; e < ne; e++) {
+        const pe = closed ? (e - 1 + ne) % ne : e - 1, nx = closed ? (e + 1) % ne : e + 1;
+        if (pe < 0 || nx >= ne || len(e) >= minLen || len(pe) < 2 * len(e) || len(nx) < 2 * len(e)) continue;
+        const a = v[pe], b = v[(pe + 1) % n], c = v[(nx + 1) % n], d = v[(e + 1) % n];
+        const L1 = { c: a, d: [(b[0] - a[0]) / (len(pe) || 1), (b[1] - a[1]) / (len(pe) || 1)] };
+        const L2 = { c: d, d: [(c[0] - d[0]) / (len(nx) || 1), (c[1] - d[1]) / (len(nx) || 1)] };
+        const x = g2.intersectLines(L1, L2, Math.sin(20 * Math.PI / 180));
+        if (!x || Math.hypot(x[0] - b[0], x[1] - b[1]) > 3 * minLen) continue;
+        const i1 = (e + 1) % n;
+        const cand = v.map((p, i) => (i === e ? x : p)).filter((_, i) => i !== i1);
+        if (maxErr(cand) <= tol) { v = cand; changed = true; break; }
+      }
+    }
+    return v;
+  }
+
+  /**
    * Automatischer Profilvorschlag.
    * 1. Raster-Ausdünnung (~ tol/2), isolierte Punkte entfernen
    * 2. Ordnen über den längsten Pfad im Minimal-Spannbaum (Delaunay)
@@ -268,7 +348,7 @@ C2B.sec = (() => {
    * 4. Geradenausgleich je Kante, Ecken = Schnitt der Nachbargeraden
    * 5. Abweichung prüfen (ggf. unterteilen), überflüssige Ecken entfernen
    */
-  function autoProfile(uv, tol = 0.02, closedMode = 'auto') {
+  function autoProfile(uv, tol = 0.02, closedMode = 'auto', maxGap = Infinity) {
     if (uv.length < 5) throw new Error('Zu wenige Punkte im Querschnitt für einen Vorschlag.');
     tol = Math.max(tol, 1e-4);
     let cell = Math.max(tol / 2, 0.002);
@@ -277,12 +357,12 @@ C2B.sec = (() => {
     // Parameter an die Punktdichte anpassen (ausgedünnte Wolken haben oft 1–3 cm Punktabstand)
     const h = nnSpacing(pts);
     pts = denoise(pts, Math.max(3 * cell, 2 * h), 2);
-    pts = dropSmallClusters(pts, Math.max(10 * cell, 5 * h, 0.05));
-    let { path, length } = orderedPath(pts);
+    pts = dropSmallClusters(pts, Math.min(maxGap, Math.max(10 * cell, 5 * h, 0.05)));
+    let { path, length } = orderedPath(pts, maxGap);
     let closed;
     if (closedMode === 'auto') {
       const gap = Math.hypot(path[0][0] - path[path.length - 1][0], path[0][1] - path[path.length - 1][1]);
-      closed = length > 0 && gap < 0.15 * length;
+      closed = length > 0 && gap < 0.15 * length && gap <= 1.25 * maxGap;   // Schnittkante des Spannbaums ist <= maxGap
     } else closed = !!closedMode;
     let idx = g2.douglasPeucker(path, tol);
     if (closed && idx.length >= 4) {
@@ -318,8 +398,58 @@ C2B.sec = (() => {
       V = refineByLines(path, idx, closed, maxShift);
     }
     V = mergeCollinear(V, closed, path, tol);
+    V = sharpenCorners(V, closed, path, tol);
     if (closed && g2.signedArea(V) < 0) V.reverse();
     return { vertices: V, closed };
+  }
+
+  /**
+   * Mehrere Teilprofile: Punkte werden nur verbunden, wenn sie höchstens «maxGap»
+   * auseinanderliegen (Einzelquerschnitte, z. B. zwei Tunnelröhren). Jede genügend grosse
+   * Punktgruppe erhält einen eigenen Vorschlag; kleine Gruppen (Leitungen, Geräte) entfallen.
+   */
+  function autoProfiles(uv, tol = 0.02, { maxGap = DEFAULT_MAX_GAP, closedMode = 'auto', minFrac = 0.15 } = {}) {
+    if (uv.length < 5) throw new Error('Zu wenige Punkte im Querschnitt für einen Vorschlag.');
+    const cell = Math.max(tol / 2, 0.002);
+    let pts = C2B.thin.gridThin2D(uv, cell);
+    const groups = clusters(pts, Math.max(maxGap, cell * 2));
+    const maxExt = Math.max(...groups.map(g => g.ext));
+    const big = groups.filter(g => g.ext >= minFrac * maxExt && g.members.length >= 10);
+    const out = [];
+    for (const g of big) {
+      const sub = g.members.map(i => pts[i]);
+      try {
+        const p = autoProfile(sub, tol, closedMode, maxGap);
+        if (p.vertices.length >= 2) out.push(Object.assign(p, { components: [] }));
+      } catch (e) { /* zu wenige Punkte in dieser Gruppe */ }
+    }
+    if (!out.length) throw new Error('Kein Profil gefunden (max. Punktabstand evtl. zu klein).');
+    // von links nach rechts sortieren
+    const cu = p => p.vertices.reduce((a, q) => a + q[0], 0) / p.vertices.length;
+    out.sort((a, b) => cu(a) - cu(b));
+    return out;
+  }
+
+  /** Punktgruppen mit Verbindungsabstand «link» (Einzelverkettung über Rasterzellen). */
+  function clusters(P, link) {
+    const n = P.length, map = new Map(), key = (ix, iy) => ix * 1048576 + iy;
+    P.forEach((p, i) => { const k = key(Math.floor(p[0] / link), Math.floor(p[1] / link)); if (!map.has(k)) map.set(k, []); map.get(k).push(i); });
+    const comp = new Int32Array(n).fill(-1), out = [], l2 = link * link;
+    for (let s0 = 0; s0 < n; s0++) {
+      if (comp[s0] >= 0) continue;
+      const members = [s0]; comp[s0] = out.length;
+      for (let h = 0; h < members.length; h++) {
+        const p = P[members[h]], ix = Math.floor(p[0] / link), iy = Math.floor(p[1] / link);
+        for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
+          const l = map.get(key(ix + a, iy + b)); if (!l) continue;
+          for (const j of l) if (comp[j] < 0 && (P[j][0] - p[0]) ** 2 + (P[j][1] - p[1]) ** 2 <= l2) { comp[j] = out.length; members.push(j); }
+        }
+      }
+      let mnx = Infinity, mny = Infinity, mxx = -Infinity, mxy = -Infinity;
+      for (const j of members) { const q = P[j]; mnx = Math.min(mnx, q[0]); mny = Math.min(mny, q[1]); mxx = Math.max(mxx, q[0]); mxy = Math.max(mxy, q[1]); }
+      out.push({ members, ext: Math.hypot(mxx - mnx, mxy - mny) });
+    }
+    return out;
   }
 
   // ─────────────────────────────────────── Vorlage an neue Punkte anpassen
@@ -391,6 +521,12 @@ C2B.sec = (() => {
     return { vertices: V, closed };
   }
 
+  /** Alle Teilprofile eines Vorlage-Querschnitts an neue Punkte anpassen (Bauteile werden kopiert). */
+  function fitSection(templateSec, uv, search = 0.15) {
+    return profilesOf(templateSec).filter(p => p.vertices.length >= 2).map(p =>
+      Object.assign(fitTemplate(p.vertices, p.closed, uv, search), { components: JSON.parse(JSON.stringify(p.components || [])) }));
+  }
+
   // ─────────────────────────────────────────────── Bauteil-Vorschlag
   const TYPE_LABEL = { floor: 'Bodenplatte', wall: 'Wand', ceiling: 'Decke' };
 
@@ -450,6 +586,7 @@ C2B.sec = (() => {
   }
 
   return { frame, uvToWorld, worldToUv, extractPoints, newSection, generateAlongAxis, orderedPath,
-    autoProfile, fitTemplate, suggestComponents, componentEdges, TYPE_LABEL, uid,
+    autoProfile, autoProfiles, fitTemplate, suggestComponents, componentEdges, TYPE_LABEL, uid,
+    profilesOf, allComponents, nVertices, fitSection, DEFAULT_MAX_GAP,
     _internals: { nnSpacing, denoise, dropSmallClusters } };
 })();

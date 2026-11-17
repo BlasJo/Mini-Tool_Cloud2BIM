@@ -1,29 +1,44 @@
-/* ═══ Cloud2BIM UI: Querschnitt-Editor (u/v-Ansicht, Profil zeichnen/bearbeiten, Bauteile) ═══ */
+/* ═══ Cloud2BIM UI: Querschnitt-Editor (u/v-Ansicht, Teilprofile zeichnen/bearbeiten, Bauteile) ═══
+   Ein Querschnitt kann mehrere Teilprofile haben (z. B. zwei Tunnelröhren). Bearbeitet wird
+   das aktive Teilprofil (this.pi); ein Klick auf ein anderes Profil macht dieses aktiv. */
 UI.SectionEditor = class {
   constructor(canvas, app) {
     this.cv = canvas; this.app = app; this.ctx = canvas.getContext('2d');
-    this.sec = null; this.pts = [];
+    this.sec = null; this.pts = []; this.pi = 0;
     this.scale = 50; this.cu = 0; this.cv0 = 0;
     this.tool = 'edit';
-    this.selV = -1; this.hoverV = -1; this.hoverE = -1;
-    this.edgeSel = null;           // { a: Kante, b: Kante }
+    this.selV = -1; this.hoverV = -1; this.hoverE = -1; this.hoverP = -1;
+    this.edgeSel = null;           // { a: Kante, b: Kante } im aktiven Teilprofil
     this.report = null;
     this.mouse = null;
-    this.drawing = null;           // Liste beim Zeichnen
+    this.drawing = null;           // Punktliste beim Zeichnen
     this._bind();
   }
 
+  profiles() { return this.sec ? C2B.sec.profilesOf(this.sec) : []; }
+  prof() { const P = this.profiles(); return P[this.pi] || null; }
+
   setSection(sec, pts, keepView) {
+    const same = sec && this.sec && sec.id === this.sec.id;
     this.sec = sec; this.pts = pts || []; this.selV = -1; this.edgeSel = null; this.drawing = null;
+    if (!same) this.pi = 0;
+    this.pi = Math.max(0, Math.min(this.pi, this.profiles().length - 1));
     if (!keepView) this.fit();
     this.update();
+  }
+
+  setActive(pi) {
+    if (pi === this.pi || pi < 0 || pi >= this.profiles().length) return;
+    this.pi = pi; this.selV = -1; this.edgeSel = null;
+    this.app.onActiveProfile();
+    this.render();
   }
 
   setTool(t) {
     this.tool = t; this.drawing = t === 'draw' ? [] : null; this.edgeSel = t === 'edges' ? this.edgeSel : null;
     const hint = UI.$('c2bSecHint');
     hint.hidden = t === 'edit';
-    hint.textContent = t === 'draw' ? 'Ecken anklicken · Klick auf erste Ecke = geschlossen · Enter = offen beenden · Esc = abbrechen'
+    hint.textContent = t === 'draw' ? 'Neues Teilprofil: Ecken anklicken · Klick auf erste Ecke = geschlossen · Enter = offen beenden · Esc = abbrechen'
       : t === 'edges' ? 'Kante anklicken = Anfang · Shift+Klick = Ende des Bereichs · danach «+ aus gewählten Kanten»' : '';
     this.cv.style.cursor = t === 'edit' ? 'default' : 'crosshair';
     this.app.onEdgeSelection(this.edgeSel);
@@ -31,7 +46,8 @@ UI.SectionEditor = class {
   }
 
   fit() {
-    const P = this.pts.length ? this.pts : (this.sec ? this.sec.profile.vertices : []);
+    let P = this.pts;
+    if (!P.length) P = this.profiles().reduce((a, p) => a.concat(p.vertices), []);
     const w = this.cv.clientWidth || 500, h = this.cv.clientHeight || 400;
     if (!P.length) { this.cu = 0; this.cv0 = 0; this.scale = 40; return this.render(); }
     let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
@@ -47,9 +63,10 @@ UI.SectionEditor = class {
   /** Abweichung neu berechnen und anzeigen. */
   update() {
     const s = this.sec;
-    if (s && s.profile.vertices.length >= 2) {
+    const P = this.profiles();
+    if (s && P.some(p => p.vertices.length >= 2)) {
       const tol = this.app.tol(), band = UI.mm('c2bBand', 0.1);
-      this.report = C2B.g2.deviationReport(this.pts, s.profile.vertices, s.profile.closed, tol, Math.max(band, tol * 1.5));
+      this.report = C2B.g2.deviationMulti(this.pts, P, tol, Math.max(band, tol * 1.5));
       s._dev = this.report.max;
     } else { this.report = null; if (s) s._dev = null; }
     this.render();
@@ -67,13 +84,13 @@ UI.SectionEditor = class {
     if (!this.sec) return;
     const dark = document.documentElement.getAttribute('data-theme') === 'dark';
     this._grid(ctx, w, h, dark);
-    // Bauteile (Ringe)
+    // Bauteile (Ringe aller Teilprofile)
     const T = this.app.thicknessMap();
-    const rings = this.sec.profile.vertices.length >= 2 ? C2B.model.sectionRings(this.sec, T.get(this.sec.id) || {}) : {};
+    const rings = C2B.model.sectionRings(this.sec, T.get(this.sec.id) || {});
     Object.values(rings).forEach(r => {
       const poly = r.inner.concat(r.outer.slice().reverse());
       const col = UI.TYPE_COLOR[r.comp.type] || '#999';
-      ctx.fillStyle = col + '55'; ctx.strokeStyle = col; ctx.lineWidth = 1;
+      ctx.fillStyle = col + (r.profileIndex === this.pi ? '55' : '30'); ctx.strokeStyle = col; ctx.lineWidth = 1;
       ctx.beginPath(); poly.forEach((p, i) => { const [x, y] = this.toS(p[0], p[1]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
       ctx.closePath(); ctx.fill(); ctx.stroke();
     });
@@ -85,19 +102,24 @@ UI.SectionEditor = class {
       if (x < -2 || y < -2 || x > w + 2 || y > h + 2) continue;
       ctx.fillRect(x - r / 2, y - r / 2, r, r);
     }
-    // Profil
-    const V = this.sec.profile.vertices, closed = this.sec.profile.closed;
-    if (V.length >= 2) {
-      const E = C2B.g2.edges(V, closed);
-      const ok = this.report ? this.report.segOk : [];
-      const selEdges = this._selEdgeSet();
+    // Teilprofile
+    const profs = this.profiles();
+    profs.forEach((P, k) => {
+      const V = P.vertices, active = k === this.pi;
+      if (V.length < 2) return;
+      const E = C2B.g2.edges(V, P.closed);
+      const ok = this.report && this.report.segOk[k] ? this.report.segOk[k] : [];
+      const selEdges = active ? this._selEdgeSet() : new Set();
+      ctx.globalAlpha = active ? 1 : (k === this.hoverP ? 0.9 : 0.55);
       E.forEach(([a, b], e) => {
         const [x1, y1] = this.toS(a[0], a[1]), [x2, y2] = this.toS(b[0], b[1]);
-        if (selEdges.has(e)) { ctx.strokeStyle = '#1f6fb2'; ctx.lineWidth = 6; ctx.globalAlpha = 0.45; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); ctx.globalAlpha = 1; }
+        if (selEdges.has(e)) { ctx.save(); ctx.strokeStyle = '#1f6fb2'; ctx.lineWidth = 6; ctx.globalAlpha = 0.45; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); ctx.restore(); }
         ctx.strokeStyle = ok[e] === false ? '#D70036' : '#2D8653';
-        ctx.lineWidth = e === this.hoverE ? 3.5 : 2.2;
+        ctx.lineWidth = active ? (e === this.hoverE ? 3.5 : 2.2) : 1.6;
+        if (!active) ctx.setLineDash([6, 3]);
         ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
-        if (this.scale > 25) {
+        ctx.setLineDash([]);
+        if (active && this.scale > 25) {
           const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
           if (L * this.scale > 60) {
             ctx.fillStyle = dark ? '#AEAEB2' : '#636366'; ctx.font = '10px system-ui, sans-serif'; ctx.textAlign = 'center';
@@ -105,14 +127,21 @@ UI.SectionEditor = class {
           }
         }
       });
-    }
-    V.forEach((p, i) => {
-      const [x, y] = this.toS(p[0], p[1]);
-      const sel = i === this.selV, hov = i === this.hoverV;
-      ctx.fillStyle = sel ? '#D70036' : (dark ? '#2C2C2E' : '#fff');
-      ctx.strokeStyle = '#D70036'; ctx.lineWidth = 1.6;
-      const s = sel || hov ? 5 : 3.5;
-      ctx.beginPath(); ctx.rect(x - s, y - s, 2 * s, 2 * s); ctx.fill(); ctx.stroke();
+      if (profs.length > 1) {   // Nummer des Teilprofils
+        let u = 0, v = 0; V.forEach(q => { u += q[0]; v += q[1]; });
+        const [x, y] = this.toS(u / V.length, v / V.length);
+        ctx.fillStyle = active ? '#D70036' : '#8E8E93'; ctx.font = 'bold 13px system-ui, sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('Profil ' + (k + 1), x, y); ctx.textAlign = 'left';
+      }
+      ctx.globalAlpha = 1;
+      if (active) V.forEach((p, i) => {
+        const [x, y] = this.toS(p[0], p[1]);
+        const sel = i === this.selV, hov = i === this.hoverV;
+        ctx.fillStyle = sel ? '#D70036' : (dark ? '#2C2C2E' : '#fff');
+        ctx.strokeStyle = '#D70036'; ctx.lineWidth = 1.6;
+        const s = sel || hov ? 5 : 3.5;
+        ctx.beginPath(); ctx.rect(x - s, y - s, 2 * s, 2 * s); ctx.fill(); ctx.stroke();
+      });
     });
     // Zeichnen
     if (this.drawing && this.drawing.length) {
@@ -131,7 +160,7 @@ UI.SectionEditor = class {
     const step = [1, 2, 5, 10].map(k => k * pow).find(v => v >= target) || pow;
     const [u0, v1] = this.toW(0, 0), [u1, v0] = this.toW(w, h);
     ctx.strokeStyle = dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'; ctx.lineWidth = 1;
-    ctx.fillStyle = dark ? '#8E8E93' : '#8E8E93'; ctx.font = '10px ui-monospace, Menlo, Consolas, monospace';
+    ctx.fillStyle = '#8E8E93'; ctx.font = '10px ui-monospace, Menlo, Consolas, monospace';
     for (let u = Math.ceil(u0 / step) * step; u <= u1; u += step) {
       const [x] = this.toS(u, 0); ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
       ctx.fillText(+u.toFixed(6) + '', x + 2, h - 4);
@@ -140,23 +169,24 @@ UI.SectionEditor = class {
       const [, y] = this.toS(0, v); ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
       ctx.fillText(+v.toFixed(6) + '', 2, y - 2);
     }
-    // Achse u = 0
     const [x0] = this.toS(0, 0);
     ctx.strokeStyle = 'rgba(215,0,54,0.35)'; ctx.setLineDash([6, 4]); ctx.beginPath(); ctx.moveTo(x0, 0); ctx.lineTo(x0, h); ctx.stroke(); ctx.setLineDash([]);
   }
 
   _selEdgeSet() {
     const set = new Set();
-    if (!this.edgeSel || !this.sec) return set;
+    if (!this.edgeSel || !this.prof()) return set;
     this._edgeRange().forEach(e => set.add(e));
     return set;
   }
 
   /** Gewählter Kantenbereich a..b (bei geschlossenen Profilen zyklisch vorwärts). */
   _edgeRange() {
-    const V = this.sec.profile.vertices, closed = this.sec.profile.closed;
+    const P = this.prof();
+    if (!P || !this.edgeSel) return [];
+    const V = P.vertices, closed = P.closed;
     const ne = C2B.g2.edgeCount(V.length, closed);
-    if (!this.edgeSel || !ne) return [];
+    if (!ne) return [];
     const { a, b } = this.edgeSel;
     const out = [];
     if (closed) { for (let e = a, g = 0; g < ne; g++, e = (e + 1) % ne) { out.push(e); if (e === b) break; } }
@@ -167,26 +197,33 @@ UI.SectionEditor = class {
   edgeSelectionAsComponent() {
     const r = this._edgeRange();
     if (!r.length) return null;
-    const n = this.sec.profile.vertices.length, closed = this.sec.profile.closed;
-    return { start: r[0], end: closed ? (r[r.length - 1] + 1) % n : r[r.length - 1] + 1, count: r.length };
+    const P = this.prof(), n = P.vertices.length;
+    return { start: r[0], end: P.closed ? (r[r.length - 1] + 1) % n : r[r.length - 1] + 1, count: r.length };
   }
 
-  _hitVertex(px, py, tolPx = 8) {
-    const V = this.sec ? this.sec.profile.vertices : [];
+  _hitVertex(px, py, tolPx = 8, pi = this.pi) {
+    const P = this.profiles()[pi];
+    const V = P ? P.vertices : [];
     let best = -1, bd = tolPx;
     V.forEach((p, i) => { const [x, y] = this.toS(p[0], p[1]); const d = Math.hypot(x - px, y - py); if (d < bd) { bd = d; best = i; } });
     return best;
   }
-  _hitEdge(px, py, tolPx = 7) {
-    const V = this.sec ? this.sec.profile.vertices : [];
-    if (V.length < 2) return -1;
+  _hitEdge(px, py, tolPx = 7, pi = this.pi) {
+    const P = this.profiles()[pi];
+    if (!P || P.vertices.length < 2) return -1;
     let best = -1, bd = tolPx;
-    C2B.g2.edges(V, this.sec.profile.closed).forEach(([a, b], e) => {
+    C2B.g2.edges(P.vertices, P.closed).forEach(([a, b], e) => {
       const [x1, y1] = this.toS(a[0], a[1]), [x2, y2] = this.toS(b[0], b[1]);
       const d = C2B.g2.distPointSeg(px, py, x1, y1, x2, y2);
       if (d < bd) { bd = d; best = e; }
     });
     return best;
+  }
+  /** Anderes Teilprofil unter der Maus (Kante oder Ecke)? */
+  _hitOtherProfile(px, py) {
+    const P = this.profiles();
+    for (let k = 0; k < P.length; k++) if (k !== this.pi && (this._hitEdge(px, py, 8, k) >= 0 || this._hitVertex(px, py, 8, k) >= 0)) return k;
+    return -1;
   }
   _nearestPoint(u, v, rPx = 14) {
     let best = null, bd = (rPx / this.scale) ** 2;
@@ -200,28 +237,30 @@ UI.SectionEditor = class {
   }
 
   insertVertex(e, p) {
-    const s = this.sec, V = s.profile.vertices;
+    const P = this.prof(); if (!P) return;
     this.app.pushUndo();
     const ni = e + 1;
-    V.splice(ni, 0, p);
-    s.components.forEach(c => { if (c.start >= ni) c.start++; if (c.end >= ni) c.end++; });
+    P.vertices.splice(ni, 0, p);
+    P.components.forEach(c => { if (c.start >= ni) c.start++; if (c.end >= ni) c.end++; });
     this.selV = ni;
     this._changed(true);
   }
 
   deleteVertex(i) {
-    const s = this.sec, V = s.profile.vertices;
+    const P = this.prof(); if (!P) return;
+    const V = P.vertices;
     if (i < 0 || i >= V.length) return;
     this.app.pushUndo();
     V.splice(i, 1);
     const n = V.length;
-    if (s.profile.closed && n < 3) s.profile.closed = false;
-    s.components.forEach(c => {
+    if (P.closed && n < 3) P.closed = false;
+    P.components.forEach(c => {
       if (c.start > i) c.start--; if (c.end > i) c.end--;
-      if (s.profile.closed) { c.start = ((c.start % n) + n) % n; c.end = ((c.end % n) + n) % n; }
+      if (P.closed) { c.start = ((c.start % n) + n) % n; c.end = ((c.end % n) + n) % n; }
       else { c.start = Math.min(c.start, n - 1); c.end = Math.min(c.end, n - 1); }
     });
-    s.components = s.components.filter(c => C2B.sec.componentEdges(c, n, s.profile.closed).length > 0 && c.start !== c.end);
+    P.components = P.components.filter(c => C2B.sec.componentEdges(c, n, P.closed).length > 0 && c.start !== c.end);
+    if (n < 2) { this.profiles().splice(this.pi, 1); this.pi = Math.max(0, this.pi - 1); }
     this.selV = -1;
     this._changed(true);
   }
@@ -266,7 +305,7 @@ UI.SectionEditor = class {
       UI.$('c2bSecInfo').textContent = 'u ' + w[0].toFixed(3) + ' m · Z ' + w[1].toFixed(3) + ' m';
       if (drag && drag.type === 'vertex') {
         drag.moved = true;
-        this.sec.profile.vertices[drag.i] = [w[0], w[1]];
+        this.prof().vertices[drag.i] = [w[0], w[1]];
         this.render();
         return;
       }
@@ -278,8 +317,9 @@ UI.SectionEditor = class {
       }
       const hv = this.tool === 'edit' ? this._hitVertex(px, py) : -1;
       const he = hv < 0 && this.tool !== 'draw' ? this._hitEdge(px, py) : -1;
-      if (hv !== this.hoverV || he !== this.hoverE || this.drawing) { this.hoverV = hv; this.hoverE = he; this.render(); }
-      cv.style.cursor = hv >= 0 ? 'move' : (this.tool === 'edit' ? (he >= 0 ? 'copy' : 'default') : 'crosshair');
+      const hp = hv < 0 && he < 0 && this.tool !== 'draw' ? this._hitOtherProfile(px, py) : -1;
+      if (hv !== this.hoverV || he !== this.hoverE || hp !== this.hoverP || this.drawing) { this.hoverV = hv; this.hoverE = he; this.hoverP = hp; this.render(); }
+      cv.style.cursor = hv >= 0 ? 'move' : hp >= 0 ? 'pointer' : (this.tool === 'edit' ? (he >= 0 ? 'copy' : 'default') : 'crosshair');
     });
     cv.addEventListener('pointerup', e => {
       const d = drag; drag = null;
@@ -299,26 +339,31 @@ UI.SectionEditor = class {
           if (Math.hypot(fx - px, fy - py) < 9) { this._finishDraw(true); return; }
         }
         D.push(w); this.render();
-      } else if (this.tool === 'edges') {
+        return;
+      }
+      // Klick auf ein anderes Teilprofil macht es aktiv
+      const other = this._hitVertex(px, py) < 0 && this._hitEdge(px, py, 9) < 0 ? this._hitOtherProfile(px, py) : -1;
+      if (other >= 0) { this.setActive(other); return; }
+      if (this.tool === 'edges') {
         const ed = this._hitEdge(px, py, 9);
-        if (ed < 0) { this.edgeSel = null; }
+        if (ed < 0) this.edgeSel = null;
         else if (e.shiftKey && this.edgeSel) this.edgeSel = { a: this.edgeSel.a, b: ed };
         else this.edgeSel = { a: ed, b: ed };
         this.app.onEdgeSelection(this.edgeSel);
         this.render();
       } else {
-        const vi = this._hitVertex(px, py);
-        this.selV = vi;
+        this.selV = this._hitVertex(px, py);
         this.render();
       }
     });
     cv.addEventListener('dblclick', e => {
-      if (!this.sec || this.tool !== 'edit') return;
+      if (!this.sec || this.tool !== 'edit' || !this.prof()) return;
       const [px, py] = pos(e);
       if (this._hitVertex(px, py) >= 0) return;
       const ed = this._hitEdge(px, py, 9);
       if (ed >= 0) {
-        const [a, b] = C2B.g2.edges(this.sec.profile.vertices, this.sec.profile.closed)[ed];
+        const P = this.prof();
+        const [a, b] = C2B.g2.edges(P.vertices, P.closed)[ed];
         const w = this.toW(px, py);
         const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy || 1;
         const t = Math.max(0, Math.min(1, ((w[0] - a[0]) * dx + (w[1] - a[1]) * dy) / L2));
@@ -331,10 +376,11 @@ UI.SectionEditor = class {
       if ((e.key === 'Delete' || e.key === 'Backspace') && this.selV >= 0 && this.tool === 'edit') { e.preventDefault(); this.deleteVertex(this.selV); }
       else if (e.key === 'Enter' && this.tool === 'draw') { e.preventDefault(); this._finishDraw(false); }
       else if (e.key === 'Escape') { if (this.tool !== 'edit') this.app.setSecTool('edit'); else { this.selV = -1; this.render(); } }
+      else if (e.key === 'Tab' && this.profiles().length > 1) { e.preventDefault(); this.setActive((this.pi + (e.shiftKey ? -1 : 1) + this.profiles().length) % this.profiles().length); }
       else if (this.tool === 'edit' && this.selV >= 0 && e.key.startsWith('Arrow')) {
         e.preventDefault();
         const st = e.shiftKey ? 0.01 : 0.001;
-        const p = this.sec.profile.vertices[this.selV];
+        const p = this.prof().vertices[this.selV];
         this.app.pushUndo();
         if (e.key === 'ArrowLeft') p[0] -= st; if (e.key === 'ArrowRight') p[0] += st;
         if (e.key === 'ArrowUp') p[1] += st; if (e.key === 'ArrowDown') p[1] -= st;
@@ -344,15 +390,19 @@ UI.SectionEditor = class {
     new ResizeObserver(() => this.render()).observe(cv);
   }
 
+  /** Gezeichnetes Profil als neues Teilprofil übernehmen. */
   _finishDraw(closed) {
     const D = this.drawing || [];
     if (D.length < 2) { this.app.setSecTool('edit'); return; }
     this.app.pushUndo();
-    this.sec.profile = { vertices: D.map(p => p.slice()), closed: closed && D.length >= 3 };
-    if (this.sec.profile.closed && C2B.g2.signedArea(this.sec.profile.vertices) < 0) this.sec.profile.vertices.reverse();
-    this.sec.components = [];
+    const P = { vertices: D.map(p => p.slice()), closed: closed && D.length >= 3, components: [] };
+    if (P.closed && C2B.g2.signedArea(P.vertices) < 0) P.vertices.reverse();
+    const list = this.profiles();
+    list.push(P);
+    this.pi = list.length - 1;
     this.drawing = null;
     this.app.setSecTool('edit');
+    this.app.onActiveProfile();
     this._changed(true);
   }
 };

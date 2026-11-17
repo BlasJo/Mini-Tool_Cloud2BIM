@@ -5,7 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 
 const ROOT = path.dirname(new URL(import.meta.url).pathname);
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const DATE = '17.11.2026';
 const TOOL = 'Cloud2BIM';
 const rd = p => fs.readFileSync(path.join(ROOT, p), 'utf8');
@@ -56,7 +56,11 @@ Koordinaten intern lokal (x/y abzueglich Ursprung auf 100 m gerundet, Float32), 
 IFC lokal mit IfcMapConversion (Bezugssystem einstellbar, Vorgabe EPSG:2056).
 Mindest-Browser: aktuelles Chrome, Edge oder Firefox (WebGL, WebAssembly).
 
-Aenderungen V${VERSION}: erste Fassung.
+Aenderungen V1.1.0: Teilprofile je Querschnitt (z. B. zwei Tunnelroehren); der automatische Vorschlag
+  verbindet nur Punkte bis zum max. Punktabstand (je Querschnitt einstellbar, Vorgabe 20 cm).
+  3D: interpolierte Volumenkoerper laufen live mit (inkl. Zwischenquerschnitte), definierte
+  Bauteilflaechen der Querschnitte werden gefuellt angezeigt. Projekte V1.0.0 werden uebernommen.
+Aenderungen V1.0.0: erste Fassung.
 -->
 <html lang="de">
 <head>

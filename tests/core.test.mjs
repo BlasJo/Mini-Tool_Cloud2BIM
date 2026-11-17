@@ -83,3 +83,36 @@ test('Voxel-Ausdünnung', () => {
   assert.equal(c.n, 1);
   assert.equal(JSON.stringify(c.offset), JSON.stringify([2600000, 1200000, 0]));
 });
+
+test('Zwei Tunnelröhren: zwei Teilprofile dank max. Punktabstand', () => {
+  const r = rng(11);
+  const V0 = culvertProfile();
+  const left = V0.map(([u, v]) => [u - 4.2, v]), right = V0.map(([u, v]) => [u + 4.2, v]);
+  const pts = sampleProfile(left, 0.01, 0.003, r).concat(sampleProfile(right, 0.01, 0.003, r));
+  for (let i = 0; i < 150; i++) pts.push([-3 + r() * 0.1, 502 + r() * 0.1]);   // Gerät in der linken Röhre
+  const P = C.sec.autoProfiles(pts, 0.01, { maxGap: 0.2 });
+  assert.equal(P.length, 2);
+  P.forEach(p => { assert.equal(p.closed, true); assert.equal(p.vertices.length, 6, JSON.stringify(p.vertices)); });
+  assert.ok(P[0].vertices[0][0] < 0 && P[1].vertices[0][0] > 0, 'links vor rechts');
+});
+
+test('Max. Punktabstand: Lücke grösser als Abstand wird nicht überbrückt', () => {
+  const r = rng(12);
+  // U-Profil mit 0.5 m Lücke im Boden -> zwei offene Teile
+  const pts = [];
+  for (let k = 0; k <= 300; k++) pts.push([-2 + (r() - .5) * .004, 500 + 3 * k / 300]);
+  for (let k = 0; k <= 175; k++) pts.push([-2 + 1.75 * k / 175, 500 + (r() - .5) * .004]);
+  for (let k = 0; k <= 175; k++) pts.push([0.25 + 1.75 * k / 175, 500 + (r() - .5) * .004]);
+  for (let k = 0; k <= 300; k++) pts.push([2 + (r() - .5) * .004, 500 + 3 * k / 300]);
+  assert.equal(C.sec.autoProfiles(pts, 0.01, { maxGap: 0.2 }).length, 2);
+  const one = C.sec.autoProfiles(pts, 0.01, { maxGap: 0.8 });
+  assert.equal(one.length, 1);
+  assert.equal(one[0].closed, false);
+});
+
+test('Altes Projektformat wird übernommen', () => {
+  const s = { id: 'x', profile: { vertices: [[0, 0], [1, 0]], closed: false }, components: [{ name: 'A' }] };
+  const P = C.sec.profilesOf(s);
+  assert.equal(P.length, 1); assert.equal(P[0].components[0].name, 'A');
+  assert.equal(s.profile, undefined); assert.equal(s.maxGap, 0.2);
+});

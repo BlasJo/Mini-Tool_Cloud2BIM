@@ -93,3 +93,25 @@ test('Stütze einpassen: Quadrat 40x40 gedreht und Kreis Ø 50', () => {
   assert.equal(g.shape, 'circle');
   assert.ok(Math.abs(g.circle.d - 0.5) < 0.01 && Math.hypot(g.circle.x - 14, g.circle.y - 5) < 0.01);
 });
+
+test('Zwei Röhren: Volumenkörper und Drahtmodell je Röhre', () => {
+  const secs = C.sec.generateAlongAxis([[0, 0], [20, 0]], { count: 3 });
+  secs.forEach(s => {
+    s.profiles = [-4.2, 4.2].map((du, k) => {
+      const V = culvertProfile().map(([u, v]) => [u + du, v]);
+      const comps = C.sec.suggestComponents(V, true);
+      comps.forEach(c => { c.name = `Röhre ${k + 1} · ${c.name}`; });
+      return { vertices: V, closed: true, components: comps };
+    });
+  });
+  const p = { offset: [0, 0, 0], sections: secs, columns: [] };
+  const { solids, warnings } = C.model.buildSolids(p);
+  assert.equal(warnings.length, 0, warnings.join());
+  assert.equal(solids.length, 8);
+  const wf = C.model.buildWireframe(p, {});
+  const long = wf.lines.filter(l => l.layer === 'C2B_Laengskanten');
+  assert.equal(long.length, 2 * 2 * 6);
+  long.forEach(l => assert.ok(Math.abs(l.pts[0][1] - l.pts[1][1]) < 1e-9, 'Längskante verbindet verschiedene Röhren'));
+  const ir = C.model.interpolatedRings(solids, 2);
+  assert.equal(ir.length, 8 * 2 * 2);
+});

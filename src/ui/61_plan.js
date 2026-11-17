@@ -93,7 +93,7 @@ UI.PlanView = class {
       const p1 = this.toScreen(f.o[0] - f.u[0] * half, f.o[1] - f.u[1] * half);
       const p2 = this.toScreen(f.o[0] + f.u[0] * half, f.o[1] + f.u[1] * half);
       const cur = s.id === app.curSecId;
-      ctx.strokeStyle = cur ? '#D70036' : (s.profile.vertices.length >= 2 ? '#2D8653' : '#8E8E93');
+      ctx.strokeStyle = cur ? '#D70036' : (this.app.hasProfile(s) ? '#2D8653' : '#8E8E93');
       ctx.lineWidth = cur ? 3 : 1.5;
       ctx.beginPath(); ctx.moveTo(p1[0], p1[1]); ctx.lineTo(p2[0], p2[1]); ctx.stroke();
       if (cur || this.scale > 3) {
@@ -143,7 +143,7 @@ UI.PlanView = class {
   }
 
   _secHalfWidth(s) {
-    const V = s.profile.vertices;
+    const V = C2B.sec.profilesOf(s).reduce((a, p) => a.concat(p.vertices), []);
     if (V.length >= 2) { let m = 0; V.forEach(p => { m = Math.max(m, Math.abs(p[0])); }); return m + 0.5; }
     return this.app.defaultHalfWidth || 5;
   }

@@ -47,6 +47,21 @@ const APP = {
   // ───────────────────────────────────────────── Punktwolke
   async loadFile(file) {
     if (this.abort) return;
+    const P = this.project;
+    if ((P.sections.length || P.columns.length) && P.source && P.source !== file.name) {
+      const r = await window.BSDialog.show({ title: 'Neue Punktwolke', message: `Das aktuelle Projekt gehört zu «${P.source}» (${P.sections.length} Querschnitte, ${P.columns.length} Stützen).\n\nVerwerfen und mit «${file.name}» neu beginnen, oder Querschnitte und Stützen behalten?`,
+        buttons: [{ label: 'Abbrechen', value: null, variant: 'gray' }, { label: 'Behalten', value: 'keep', variant: 'gray' }, { label: 'Neu beginnen', value: 'reset', variant: 'red', focus: true }] });
+      if (!r) return;
+      if (r === 'reset') {
+        this.pushUndo();
+        Object.assign(P, { offset: null, axis: [], sections: [], columns: [] });
+        this.curSecId = null; this.curColId = null; this.solids = null; this.modelBuilt = false;
+        if (this.v3d) { this.v3d.setModel([], []); this.v3d.setWire([]); }
+        ['c2bAxS_E', 'c2bAxS_N', 'c2bAxE_E', 'c2bAxE_N'].forEach(id => { UI.$(id).value = ''; });
+        UI.$('c2bBuildStat').textContent = '';
+        this.selectSection(null);
+      }
+    }
     const ctrl = this.abort = new AbortController();
     UI.$('c2bAbort').hidden = false;
     UI.$('c2bDropFile').textContent = file.name;
@@ -246,19 +261,27 @@ const APP = {
     this.updateAll();
   },
 
+  /** Teilprofile des Querschnitts / aktives Teilprofil im Editor. */
+  profs(s) { return s ? C2B.sec.profilesOf(s) : []; },
+  curProf() { const s = this.curSec(); return s ? (this.profs(s)[this.ed.pi] || null) : null; },
+  hasProfile(s) { return this.profs(s).some(p => p.vertices.length >= 2); },
+  maxGap(s) { return (s && s.maxGap > 0) ? s.maxGap : C2B.sec.DEFAULT_MAX_GAP; },
+
   /** Abweichung eines Querschnitts für die Liste berechnen. */
   devOf(s) {
-    if (s.profile.vertices.length < 2) { s._dev = null; return null; }
+    if (!this.hasProfile(s)) { s._dev = null; return null; }
     const tol = this.tol();
-    const rep = C2B.g2.deviationReport(this.secPts(s), s.profile.vertices, s.profile.closed, tol, Math.max(UI.mm('c2bBand', 0.1), tol * 1.5));
+    const rep = C2B.g2.deviationMulti(this.secPts(s), this.profs(s), tol, Math.max(UI.mm('c2bBand', 0.1), tol * 1.5));
     s._dev = rep.max;
     return rep;
   },
 
+  topoKey(profiles) { return profiles.map(p => p.vertices.length + (p.closed ? 'g' : 'o')).join('+'); },
+
   /**
    * Profile für eine Serie von Querschnitten vorschlagen:
-   * 1. für jeden Querschnitt ein automatischer Vorschlag
-   * 2. Referenz = häufigste Eckenzahl unter den gut passenden Vorschlägen (meiste Punkte)
+   * 1. für jeden Querschnitt ein automatischer Vorschlag (Teilprofile über max. Punktabstand)
+   * 2. Referenz = häufigste Topologie unter den gut passenden Vorschlägen (meiste Punkte)
    * 3. Referenz schrittweise auf die Nachbarn übertragen und anpassen (gleiche Topologie);
    *    passt die Vorlage schlecht, bleibt der eigene Vorschlag.
    */
@@ -272,24 +295,25 @@ const APP = {
       const pts = this.secPts(S[i]);
       let prof = null, rep = null;
       if (pts.length >= 10) {
-        try { prof = C2B.sec.autoProfile(pts, tol); rep = C2B.g2.deviationReport(pts, prof.vertices, prof.closed, tol, band); }
+        try { prof = C2B.sec.autoProfiles(pts, tol, { maxGap: this.maxGap(S[i]) }); rep = C2B.g2.deviationMulti(pts, prof, tol, band); }
         catch (e) { UI.log(`${S[i].name}: ${e.message}`, 'warn'); }
       }
       auto.push({ prof, rep, n: pts.length });
     }
     const good = auto.map((a, i) => ({ a, i })).filter(x => x.a.prof && x.a.rep.withinTol >= 0.95);
     if (!good.length) {
-      S.forEach((s, i) => { if (auto[i].prof) { s.profile = auto[i].prof; s.components = []; } });
+      S.forEach((s, i) => { if (auto[i].prof) s.profiles = auto[i].prof; });
       UI.progress(null); UI.log('Kein Querschnitt mit eindeutigem Profil gefunden – Einzelvorschläge übernommen, bitte prüfen.', 'warn');
       S.forEach(s => this.devOf(s)); this.reloadCurrentSectionPoints(); return;
     }
     const cnt = {};
-    good.forEach(x => { const k = x.a.prof.vertices.length + (x.a.prof.closed ? 'g' : 'o'); cnt[k] = (cnt[k] || 0) + 1; });
+    good.forEach(x => { const k = this.topoKey(x.a.prof); cnt[k] = (cnt[k] || 0) + 1; });
     const modeKey = Object.entries(cnt).sort((a, b) => b[1] - a[1])[0][0];
-    const ref = good.filter(x => x.a.prof.vertices.length + (x.a.prof.closed ? 'g' : 'o') === modeKey).sort((a, b) => b.a.n - a.a.n)[0].i;
-    S[ref].profile = auto[ref].prof; S[ref].components = S[ref].components || [];
-    UI.log(`Referenzquerschnitt: ${S[ref].name} (${auto[ref].prof.vertices.length} Ecken, ${cnt[modeKey]} von ${S.length} Vorschlägen gleich).`);
-    let done = 1, own = [];
+    const ref = good.filter(x => this.topoKey(x.a.prof) === modeKey).sort((a, b) => b.a.n - a.a.n)[0].i;
+    S[ref].profiles = auto[ref].prof;
+    UI.log(`Referenzquerschnitt: ${S[ref].name} (${auto[ref].prof.length > 1 ? auto[ref].prof.length + ' Teilprofile, ' : ''}${auto[ref].prof.map(p => p.vertices.length).join(' + ')} Ecken, ${cnt[modeKey]} von ${S.length} Vorschlägen gleich).`);
+    let done = 1;
+    const own = [];
     for (const dir of [1, -1]) {
       let prev = S[ref];
       for (let k = ref + dir; k >= 0 && k < S.length; k += dir) {
@@ -297,15 +321,15 @@ const APP = {
         UI.progress(0.5 + 0.5 * (++done) / S.length, `Anpassen ${done} / ${S.length}`);
         if (done % 4 === 0) await UI.tick();
         if (pts.length < 10) continue;
-        const fit = C2B.sec.fitTemplate(prev.profile.vertices, prev.profile.closed, pts, search);
-        const rep = C2B.g2.deviationReport(pts, fit.vertices, fit.closed, tol, band);
-        if (rep.withinTol !== null && rep.withinTol >= 0.8) { s.profile = fit; s.components = JSON.parse(JSON.stringify(prev.components || [])); prev = s; }
-        else if (auto[k].prof) { s.profile = auto[k].prof; s.components = []; own.push(s.name); }
+        const fit = C2B.sec.fitSection(prev, pts, search);
+        const rep = C2B.g2.deviationMulti(pts, fit, tol, band);
+        if (rep.withinTol !== null && rep.withinTol >= 0.8) { s.profiles = fit; prev = s; }
+        else if (auto[k].prof) { s.profiles = auto[k].prof; own.push(s.name); }
       }
     }
     UI.progress(null);
     S.forEach(s => this.devOf(s));
-    UI.log(`Profile für ${S.length} Querschnitte vorgeschlagen` + (own.length ? `; eigene Topologie (Vorlage passte nicht): ${own.join(', ')}` : '; alle mit gleicher Eckenzahl') + '.');
+    UI.log(`Profile für ${S.length} Querschnitte vorgeschlagen` + (own.length ? `; eigene Topologie (Vorlage passte nicht): ${own.join(', ')}` : '; alle mit gleicher Topologie') + '.');
     if (own.length) UI.log('Querschnitte mit eigener Topologie prüfen – für Drahtmodell und Bauteile ist gleiche Eckenzahl ideal.', 'warn');
     this.reloadCurrentSectionPoints();
   },
@@ -318,10 +342,24 @@ const APP = {
     if (s) {
       this.ed.setSection(s, this.secPts(s), keepView && this.ed.sec && this.ed.sec.id === s.id);
       UI.$('c2bSecTitle').textContent = s.name + ' · Station ' + s.station.toFixed(2);
-      UI.$('c2bClosed').checked = !!s.profile.closed;
+      UI.$('c2bMaxGap').value = Math.round(this.maxGap(s) * 100);
     } else { this.ed.setSection(null, []); UI.$('c2bSecTitle').textContent = 'Querschnitt'; }
-    this.renderSecList(); this.renderComp(); this.refreshSections3d(); this.plan.render();
+    this.onActiveProfile(true);
+    this.renderSecList(); this.refreshSections3d(); this.plan.render();
     this.updateButtons();
+  },
+
+  /** Auswahl des aktiven Teilprofils (Liste, «geschlossen», Bauteiltabelle) nachführen. */
+  onActiveProfile(silent) {
+    const s = this.curSec(), sel = UI.$('c2bProfSel');
+    const P = this.profs(s);
+    sel.innerHTML = P.map((p, k) => `<option value="${k}"${k === this.ed.pi ? ' selected' : ''}>Profil ${k + 1} (${p.vertices.length} Ecken${p.closed ? '' : ', offen'})</option>`).join('');
+    sel.hidden = P.length < 2;
+    const cp = this.curProf();
+    UI.$('c2bClosed').checked = !!(cp && cp.closed);
+    this.renderComp();
+    this.onEdgeSelection(null);
+    if (!silent) this.updateButtons();
   },
 
   stepSection(d) {
@@ -337,57 +375,60 @@ const APP = {
     const pts = this.secPts(s);
     try {
       if (!quiet) this.pushUndo();
-      s.profile = C2B.sec.autoProfile(pts, this.tol());
-      s.components = [];
-      UI.log(`${s.name}: Vorschlag mit ${s.profile.vertices.length} Ecken (${s.profile.closed ? 'geschlossen' : 'offen'}).`);
+      s.profiles = C2B.sec.autoProfiles(pts, this.tol(), { maxGap: this.maxGap(s) });
+      this.ed.pi = 0;
+      UI.log(`${s.name}: Vorschlag mit ${s.profiles.length > 1 ? s.profiles.length + ' Teilprofilen, ' : ''}${s.profiles.map(p => p.vertices.length + ' Ecken' + (p.closed ? '' : ' (offen)')).join(' + ')}.`);
     } catch (e) { UI.log(s.name + ': ' + e.message, 'warn'); if (!quiet) UI.alert('Vorschlag nicht möglich', e.message); }
     this.ed.setSection(s, pts, true); this.ed.fit();
+    this.onActiveProfile();
     this.onProfileChanged(s, true);
   },
 
   fromPrev() {
     const S = this.sortedSecs(), i = S.findIndex(s => s.id === this.curSecId);
     let prev = null;
-    for (let k = i - 1; k >= 0; k--) if (S[k].profile.vertices.length >= 2) { prev = S[k]; break; }
-    if (!prev) for (let k = i + 1; k < S.length; k++) if (S[k].profile.vertices.length >= 2) { prev = S[k]; break; }
+    for (let k = i - 1; k >= 0; k--) if (this.hasProfile(S[k])) { prev = S[k]; break; }
+    if (!prev) for (let k = i + 1; k < S.length; k++) if (this.hasProfile(S[k])) { prev = S[k]; break; }
     if (!prev) return UI.alert('Keine Vorlage', 'Es gibt noch keinen anderen Querschnitt mit Profil.');
     const s = S[i];
     this.pushUndo();
-    s.profile = C2B.sec.fitTemplate(prev.profile.vertices, prev.profile.closed, this.secPts(s), UI.mm('c2bFitSearch', 0.15));
-    s.components = JSON.parse(JSON.stringify(prev.components));
+    s.profiles = C2B.sec.fitSection(prev, this.secPts(s), UI.mm('c2bFitSearch', 0.15));
+    this.ed.pi = 0;
     UI.log(`${s.name}: Profil von «${prev.name}» übernommen und angepasst.`);
-    this.ed.update();
+    this.ed.update(); this.onActiveProfile();
     this.onProfileChanged(s, true);
   },
 
   refit() {
-    const s = this.curSec();
-    if (!s || s.profile.vertices.length < 2) return;
+    const s = this.curSec(), P = this.curProf();
+    if (!s || !P || P.vertices.length < 2) return;
     this.pushUndo();
-    s.profile = C2B.sec.fitTemplate(s.profile.vertices, s.profile.closed, this.secPts(s), UI.mm('c2bFitSearch', 0.15), false);
+    const f = C2B.sec.fitTemplate(P.vertices, P.closed, this.secPts(s), UI.mm('c2bFitSearch', 0.15), false);
+    P.vertices = f.vertices;
     this.ed.update();
     this.onProfileChanged(s, false);
   },
 
   async autoAll() {
-    const empty = this.project.sections.filter(s => s.profile.vertices.length < 2);
+    const empty = this.project.sections.filter(s => !this.hasProfile(s));
     if (!empty.length) return UI.log('Alle Querschnitte haben bereits ein Profil.');
     this.pushUndo();
     for (let i = 0; i < empty.length; i++) {
       UI.progress(i / empty.length, `Vorschlag ${i + 1} / ${empty.length}`); await UI.tick();
-      try { empty[i].profile = C2B.sec.autoProfile(this.secPts(empty[i]), this.tol()); empty[i].components = []; this.devOf(empty[i]); }
+      try { empty[i].profiles = C2B.sec.autoProfiles(this.secPts(empty[i]), this.tol(), { maxGap: this.maxGap(empty[i]) }); this.devOf(empty[i]); }
       catch (e) { UI.log(empty[i].name + ': ' + e.message, 'warn'); }
     }
     UI.progress(null);
     this.reloadCurrentSectionPoints(); this.modelDirty(); this.updateAll();
   },
 
-  /** Profil + Bauteile des aktuellen Querschnitts schrittweise nach beiden Seiten übertragen. */
+  /** Profile + Bauteile des aktuellen Querschnitts schrittweise nach beiden Seiten übertragen. */
   async propagate() {
     const S = this.sortedSecs(), i0 = S.findIndex(s => s.id === this.curSecId);
     const src = S[i0];
-    if (!src || src.profile.vertices.length < 2) return;
-    const ok = await UI.confirm('Profil auf alle übertragen', `Das Profil von «${src.name}» (${src.profile.vertices.length} Ecken) wird auf alle ${S.length - 1} anderen Querschnitte übertragen und dort an die Punkte angepasst. Bestehende Profile und Bauteile werden ersetzt.`);
+    if (!src || !this.hasProfile(src)) return;
+    const P = this.profs(src);
+    const ok = await UI.confirm('Profil auf alle übertragen', `Das Profil von «${src.name}» (${P.length > 1 ? P.length + ' Teilprofile, ' : ''}${P.map(p => p.vertices.length).join(' + ')} Ecken) wird auf alle ${S.length - 1} anderen Querschnitte übertragen und dort an die Punkte angepasst. Bestehende Profile und Bauteile werden ersetzt.`);
     if (!ok) return;
     this.pushUndo();
     const search = UI.mm('c2bFitSearch', 0.15);
@@ -398,9 +439,9 @@ const APP = {
         const s = S[k];
         UI.progress(++n / (S.length - 1), `Übertragen ${n} / ${S.length - 1}`);
         if (n % 3 === 0) await UI.tick();
-        const pts = this.secPts(s);
-        s.profile = C2B.sec.fitTemplate(prev.profile.vertices, prev.profile.closed, pts, search);
-        s.components = JSON.parse(JSON.stringify(src.components));
+        s.profiles = C2B.sec.fitSection(prev, this.secPts(s), search);
+        // Bauteile immer vom Ausgangsquerschnitt
+        s.profiles.forEach((p, k2) => { p.components = JSON.parse(JSON.stringify(P[k2] ? P[k2].components : [])); });
         prev = s;
       }
     }
@@ -427,7 +468,10 @@ const APP = {
   },
 
   onProfileChanged(s) {
-    UI.$('c2bClosed').checked = !!s.profile.closed;
+    const cp = this.curProf();
+    UI.$('c2bClosed').checked = !!(cp && cp.closed);
+    const sel = UI.$('c2bProfSel');
+    if (sel.options.length !== this.profs(s).length) this.onActiveProfile(true);
     this.renderSecList(); this.renderComp();
     clearTimeout(this._t3d); this._t3d = setTimeout(() => this.refreshSections3d(), 150);
     this.plan.render();
@@ -440,10 +484,12 @@ const APP = {
     const el = UI.$('c2bSecStats');
     if (!s) return;
     const n = this.secPts(s).length;
-    if (!rep || rep.max === null) { el.innerHTML = `<span>Punkte <b>${UI.fmtInt(n)}</b></span><span>Ecken <b>${s.profile.vertices.length}</b></span><span class="c2b-mute">kein Profil – «Vorschlag» oder «Zeichnen»</span>`; return; }
+    const P = this.profs(s);
+    const ecken = P.length > 1 ? `<span>Teilprofile <b>${P.length}</b></span><span>Ecken <b>${P.map(p => p.vertices.length).join(' + ')}</b></span>` : `<span>Ecken <b>${P.length ? P[0].vertices.length : 0}</b></span>`;
+    if (!rep || rep.max === null) { el.innerHTML = `<span>Punkte <b>${UI.fmtInt(n)}</b></span>${ecken}<span class="c2b-mute">kein Profil – «Vorschlag» oder «Zeichnen»</span>`; return; }
     const tol = this.tol();
     const okCls = rep.max <= tol ? 'c2b-ok' : 'c2b-bad';
-    el.innerHTML = `<span>Punkte <b>${UI.fmtInt(n)}</b> (${UI.fmtInt(rep.nUsed)} am Profil)</span><span>Ecken <b>${s.profile.vertices.length}</b></span>` +
+    el.innerHTML = `<span>Punkte <b>${UI.fmtInt(n)}</b> (${UI.fmtInt(rep.nUsed)} am Profil)</span>${ecken}` +
       `<span>max <b class="${okCls}">${UI.fmtMM(rep.max)}</b></span><span>95 % <b>${UI.fmtMM(rep.p95)}</b></span><span>Mittel <b>${UI.fmtMM(rep.mean)}</b></span>` +
       `<span>in Toleranz <b>${(rep.withinTol * 100).toFixed(1)} %</b></span><span class="c2b-mute">Toleranz ${UI.fmtMM(tol)}</span>`;
     this.renderSecList();
@@ -453,10 +499,12 @@ const APP = {
     const tb = UI.$('c2bSecList').querySelector('tbody');
     const tol = this.tol();
     tb.innerHTML = this.sortedSecs().map(s => {
-      const nV = s.profile.vertices.length;
+      const P = this.profs(s).filter(p => p.vertices.length);
+      const nV = P.map(p => p.vertices.length).join('+');
       const dev = s._dev;
       const devTxt = dev === null || dev === undefined ? '<span class="c2b-mute">–</span>' : `<span class="${dev <= tol ? 'c2b-ok' : 'c2b-bad'}">${(dev * 1000).toFixed(0)} mm</span>`;
-      const comp = s.components.length ? `<span class="c2b-ok" title="${s.components.length} Bauteile">●</span>` : '<span class="c2b-mute">○</span>';
+      const nc = C2B.sec.allComponents(s).length;
+      const comp = nc ? `<span class="c2b-ok" title="${nc} Bauteile">●</span>` : '<span class="c2b-mute">○</span>';
       return `<tr data-id="${s.id}" class="${s.id === this.curSecId ? 'sel' : ''}"><td>${UI.esc(s.name)}</td><td>${s.station.toFixed(2)}</td><td>${nV || '–'}</td><td>${devTxt}</td><td>${comp}</td></tr>`;
     }).join('');
     const sel = tb.querySelector('tr.sel');
@@ -465,18 +513,28 @@ const APP = {
 
   refreshSections3d() {
     if (!this.v3d) return;
-    this.v3d.setSections(this.project.sections, this.curSecId, this.zRange);
+    this.v3d.setSections(this.project.sections, this.curSecId, this.zRange, this.thicknessMap(), UI.$('c2bShowAreas').getAttribute('aria-pressed') === 'true');
   },
 
   // ───────────────────────────────────────────── Bauteile
   defaultThickness() { return { floor: UI.mm('c2bTFloor', 0.3), wall: UI.mm('c2bTWall', 0.3), ceiling: UI.mm('c2bTCeil', 0.3) }; },
 
+  /** Bauteile für ein Teilprofil vorschlagen; bei mehreren Teilprofilen Name mit Präfix «Profil k ·». */
+  suggestFor(s, k) {
+    const P = this.profs(s)[k];
+    const comps = C2B.sec.suggestComponents(P.vertices, P.closed, this.defaultThickness(), UI.num('c2bWallAng', 35));
+    if (this.profs(s).length > 1) comps.forEach(c => { c.name = `Profil ${k + 1} · ${c.name}`; });
+    P.components = comps;
+    return comps;
+  },
+
   suggestCurrent() {
     const s = this.curSec();
-    if (!s || s.profile.vertices.length < 2) return;
+    if (!s || !this.hasProfile(s)) return;
     this.pushUndo();
-    s.components = C2B.sec.suggestComponents(s.profile.vertices, s.profile.closed, this.defaultThickness(), UI.num('c2bWallAng', 35));
-    UI.log(`${s.name}: ${s.components.length} Bauteile vorgeschlagen (${s.components.map(c => c.name).join(', ')}).`);
+    const names = [];
+    this.profs(s).forEach((P, k) => { if (P.vertices.length >= 2) names.push(...this.suggestFor(s, k).map(c => c.name)); });
+    UI.log(`${s.name}: ${names.length} Bauteile vorgeschlagen (${names.join(', ')}).`);
     this.onProfileChanged(s); this.ed.render();
   },
 
@@ -484,8 +542,9 @@ const APP = {
     this.pushUndo();
     let n = 0;
     this.project.sections.forEach(s => {
-      if (s.profile.vertices.length >= 2 && !s.components.length) {
-        s.components = C2B.sec.suggestComponents(s.profile.vertices, s.profile.closed, this.defaultThickness(), UI.num('c2bWallAng', 35)); n++;
+      if (this.hasProfile(s) && !C2B.sec.allComponents(s).length) {
+        this.profs(s).forEach((P, k) => { if (P.vertices.length >= 2) this.suggestFor(s, k); });
+        n++;
       }
     });
     UI.log(`Bauteile für ${n} Querschnitte vorgeschlagen.`);
@@ -494,46 +553,52 @@ const APP = {
 
   copyComponents() {
     const src = this.curSec();
-    if (!src || !src.components.length) return UI.alert('Keine Bauteile', 'Der aktuelle Querschnitt hat noch keine Bauteile.');
+    if (!src || !C2B.sec.allComponents(src).length) return UI.alert('Keine Bauteile', 'Der aktuelle Querschnitt hat noch keine Bauteile.');
     const blank = UI.$('c2bCompCopyInterp').checked;
+    const SP = this.profs(src);
     this.pushUndo();
-    let n = 0, skip = [];
+    let n = 0;
+    const skip = [];
     this.project.sections.forEach(s => {
       if (s === src) return;
-      if (s.profile.vertices.length !== src.profile.vertices.length || !!s.profile.closed !== !!src.profile.closed) { if (s.profile.vertices.length) skip.push(s.name); return; }
-      s.components = src.components.map(c => Object.assign({}, c, blank ? { thickness: null } : {}));
+      const P = this.profs(s);
+      const same = P.length === SP.length && P.every((p, k) => p.vertices.length === SP[k].vertices.length && !!p.closed === !!SP[k].closed);
+      if (!same) { if (this.hasProfile(s)) skip.push(s.name); return; }
+      P.forEach((p, k) => { p.components = SP[k].components.map(c => Object.assign({}, c, blank ? { thickness: null } : {})); });
       n++;
     });
     UI.log(`Bauteile auf ${n} Querschnitte übertragen` + (blank ? ' (Stärken interpoliert)' : '') + '.');
-    if (skip.length) UI.log(`Nicht übertragen (andere Eckenzahl): ${skip.join(', ')}. Tipp: «Profil auf alle» für gleiche Topologie.`, 'warn');
+    if (skip.length) UI.log(`Nicht übertragen (andere Topologie): ${skip.join(', ')}. Tipp: «Profil auf alle» für gleiche Topologie.`, 'warn');
     this.renderComp(); this.ed.render(); this.modelDirty(); this.updateAll();
   },
 
   addComponentFromEdges() {
-    const s = this.curSec(), r = this.ed.edgeSelectionAsComponent();
-    if (!s || !r) return UI.alert('Keine Kanten gewählt', 'Mit dem Werkzeug «Kanten wählen» zuerst die Kanten des Bauteils markieren (Klick = Anfang, Shift+Klick = Ende).');
-    const n = s.profile.vertices.length, closed = s.profile.closed;
+    const s = this.curSec(), P = this.curProf(), r = this.ed.edgeSelectionAsComponent();
+    if (!s || !P || !r) return UI.alert('Keine Kanten gewählt', 'Mit dem Werkzeug «Kanten wählen» zuerst die Kanten des Bauteils markieren (Klick = Anfang, Shift+Klick = Ende).');
+    const n = P.vertices.length, closed = P.closed;
     const newE = new Set(C2B.sec.componentEdges(r, n, closed));
     this.pushUndo();
     // gewählte Kanten aus bestehenden Bauteilen herauslösen
     const rest = [];
-    s.components.forEach(c => {
+    P.components.forEach(c => {
       const ce = C2B.sec.componentEdges(c, n, closed);
       let run = [];
       const flush = () => { if (run.length) rest.push(Object.assign({}, c, { start: run[0], end: closed ? (run[run.length - 1] + 1) % n : run[run.length - 1] + 1 })); run = []; };
       ce.forEach(e => { if (newE.has(e)) flush(); else run.push(e); });
       flush();
     });
-    const mid = [...newE].map(e => C2B.g2.edges(s.profile.vertices, closed)[e]);
+    const mid = [...newE].map(e => C2B.g2.edges(P.vertices, closed)[e]);
     let ang = 0; mid.forEach(([a, b]) => { const g = Math.abs(Math.atan2(b[1] - a[1], b[0] - a[0]) * 180 / Math.PI); ang += Math.min(g, 180 - g); });
     ang /= mid.length;
     let vmid = 0; mid.forEach(([a, b]) => { vmid += (a[1] + b[1]) / 2; }); vmid /= mid.length;
-    const vs = s.profile.vertices.map(p => p[1]), vc = (Math.min(...vs) + Math.max(...vs)) / 2;
+    const vs = P.vertices.map(p => p[1]), vc = (Math.min(...vs) + Math.max(...vs)) / 2;
     const type = ang > UI.num('c2bWallAng', 35) ? 'wall' : (vmid < vc ? 'floor' : 'ceiling');
-    let name = UI.TYPE_LABEL[type], k = 1;
-    while (rest.some(c => c.name === name)) name = UI.TYPE_LABEL[type] + ' ' + (++k);
+    const prefix = this.profs(s).length > 1 ? `Profil ${this.ed.pi + 1} · ` : '';
+    const all = C2B.sec.allComponents(s).filter(c => !P.components.includes(c)).concat(rest);
+    let name = prefix + UI.TYPE_LABEL[type], k = 1;
+    while (all.some(c => c.name === name)) name = prefix + UI.TYPE_LABEL[type] + ' ' + (++k);
     rest.push({ name, type, start: r.start, end: r.end, thickness: this.defaultThickness()[type], flip: false });
-    s.components = rest;
+    P.components = rest;
     this.ed.edgeSel = null;
     this.onEdgeSelection(null);
     this.onProfileChanged(s); this.ed.render();
@@ -546,13 +611,13 @@ const APP = {
   },
 
   renderComp() {
-    const s = this.curSec();
+    const s = this.curSec(), P = this.curProf();
     const tb = UI.$('c2bComp').querySelector('tbody');
-    if (!s) { tb.innerHTML = ''; return; }
+    if (!s || !P) { tb.innerHTML = s ? `<tr><td colspan="7" class="c2b-mute" style="padding:6px">Noch kein Profil.</td></tr>` : ''; return; }
     const T = this.thicknessMap().get(s.id) || {};
-    const n = s.profile.vertices.length;
-    tb.innerHTML = s.components.map((c, i) => {
-      const ne = C2B.sec.componentEdges(c, n, s.profile.closed).length;
+    const n = P.vertices.length;
+    tb.innerHTML = P.components.map((c, i) => {
+      const ne = C2B.sec.componentEdges(c, n, P.closed).length;
       const eff = T[c.name] ? (T[c.name].t * 1000).toFixed(0) : '';
       const opts = Object.entries(UI.TYPE_LABEL).map(([k, v]) => `<option value="${k}"${k === c.type ? ' selected' : ''}>${v}</option>`).join('');
       const tval = c.thickness === null || c.thickness === undefined || c.thickness === '' ? '' : (c.thickness * 1000).toFixed(0);
@@ -562,12 +627,15 @@ const APP = {
         `<td><input type="number" data-f="thickness" min="1" step="10" value="${tval}" placeholder="${eff ? 'interp. ' + eff : ''}" title="leer = interpoliert"></td>` +
         `<td style="text-align:center"><input type="checkbox" data-f="flip"${c.flip ? ' checked' : ''}></td>` +
         `<td><button class="c2b-x" data-f="del" title="Bauteil entfernen">×</button></td></tr>`;
-    }).join('') || `<tr><td colspan="7" class="c2b-mute" style="padding:6px">Noch keine Bauteile – «Bauteile vorschlagen» oder Kanten wählen.</td></tr>`;
+    }).join('') || `<tr><td colspan="7" class="c2b-mute" style="padding:6px">Noch keine Bauteile${this.profs(s).length > 1 ? ' in Profil ' + (this.ed.pi + 1) : ''} – «Bauteile vorschlagen» oder Kanten wählen.</td></tr>`;
   },
 
   // ───────────────────────────────────────────── Modell
+  /** Modell (interpolierte Volumenkörper) läuft im 3D immer mit, sobald Bauteile oder Stützen bestehen. */
   modelDirty() {
-    if (this.modelBuilt) { clearTimeout(this._tm); this._tm = setTimeout(() => this.buildModel(true), 500); }
+    const any = this.project.sections.some(s => C2B.sec.allComponents(s).length) || this.project.columns.length;
+    clearTimeout(this._tm);
+    if (any || this.modelBuilt) this._tm = setTimeout(() => this.buildModel(true), 400);
     this.updateButtons();
   },
 
@@ -575,7 +643,8 @@ const APP = {
     const { solids, warnings } = C2B.model.buildSolids(this.project, { split: UI.$('c2bIfcSplit').value });
     this.solids = solids;
     this.modelBuilt = true;
-    if (this.v3d) this.v3d.setModel(solids, this.project.columns);
+    if (this.v3d) this.v3d.setModel(solids, this.project.columns, Math.max(1, Math.round(UI.num('c2bInterpN', 3))));
+    this.refreshSections3d();
     this.buildWire();
     let vol = 0; solids.forEach(s => { vol += s.volume; });
     UI.$('c2bBuildStat').innerHTML = `${solids.length} Bauteile · ${this.project.columns.length} Stützen<br>Volumen ${vol.toFixed(2)} m³` + (warnings.length ? `<br><span class="c2b-bad">${warnings.length} Hinweis(e), siehe Log</span>` : '');
@@ -692,7 +761,7 @@ const APP = {
       Object.assign(this.project, { name: p.name || 'Cloud2BIM', offset: p.offset || this.project.offset, axis: p.axis || [],
         sections: p.sections || [], columns: p.columns || [] });
       if (!this.project.source) this.project.source = p.source;
-      this.project.sections.forEach(s => { s.components = s.components || []; s.profile = s.profile || { vertices: [], closed: true }; });
+      this.project.sections.forEach(s => C2B.sec.profilesOf(s));
       if (d.settings) { UI.SETTING_IDS.forEach(id => { const el = UI.$(id); if (el && id in d.settings) { if (el.type === 'checkbox') el.checked = !!d.settings[id]; else el.value = d.settings[id]; } }); }
       if (this.project.axis.length >= 2) this.setAxisInputs(this.project.axis);
       this.secPtsCache.clear();
@@ -720,8 +789,8 @@ const APP = {
 
   updateButtons() {
     const has = !!this.cloud, nS = this.project.sections.length, s = this.curSec();
-    const prof = s && s.profile.vertices.length >= 2;
-    const anyComp = this.project.sections.some(x => x.components.length);
+    const prof = s && this.hasProfile(s);
+    const anyComp = this.project.sections.some(x => C2B.sec.allComponents(x).length);
     const set = (id, en) => { UI.$(id).disabled = !en; };
     set('c2bThin', has); set('c2bThinReset', has && this.cloud !== this.raw);
     set('c2bAxisDraw', has); set('c2bCutDraw', has); set('c2bGen', has || nS >= 0);
@@ -729,19 +798,20 @@ const APP = {
     set('c2bSecDel', !!s); set('c2bSecDelAll', nS > 0);
     set('c2bSecPrev', nS > 1); set('c2bSecNext', nS > 1);
     set('c2bAuto', has && !!s); set('c2bFromPrev', has && !!s && nS > 1); set('c2bRefit', has && prof); set('c2bClosed', prof); set('c2bClear', prof);
-    set('c2bCompAutoAll', nS > 0); set('c2bCompCopy', s && s.components.length > 0 && nS > 1);
+    set('c2bCompAutoAll', nS > 0); set('c2bCompCopy', s && C2B.sec.allComponents(s).length > 0 && nS > 1);
     set('c2bBuild', anyComp || this.project.columns.length > 0);
     set('c2bColPlace', has);
     set('c2bExpIfc', anyComp || this.project.columns.length > 0);
-    set('c2bExpDxf', this.project.sections.some(x => x.profile.vertices.length >= 2)); set('c2bExpObj', this.project.sections.some(x => x.profile.vertices.length >= 2));
+    const anyProf = this.project.sections.some(x => this.hasProfile(x));
+    set('c2bExpDxf', anyProf); set('c2bExpObj', anyProf);
     set('c2bSave', nS > 0 || this.project.columns.length > 0);
     UI.$('c2bCompAuto').disabled = !prof;
   },
 
   updateAll() {
     const c = this.cloud, P = this.project;
-    const nProf = P.sections.filter(s => s.profile.vertices.length >= 2).length;
-    const nComp = P.sections.filter(s => s.components.length).length;
+    const nProf = P.sections.filter(s => this.hasProfile(s)).length;
+    const nComp = P.sections.filter(s => C2B.sec.allComponents(s).length).length;
     UI.$('c2bInfo1').textContent = this.raw ? UI.fmtInt(this.raw.n) + ' Pkt' : '';
     UI.$('c2bInfo2').textContent = c && c !== this.raw ? UI.fmtInt(c.n) + ' Pkt' : '';
     UI.$('c2bInfo3').textContent = P.sections.length ? `${nProf}/${P.sections.length}` : '';
@@ -840,6 +910,7 @@ const APP = {
     $('c2bExpIfc').addEventListener('click', () => this.exportIfc());
     $('c2bExpDxf').addEventListener('click', () => this.exportWire('dxf'));
     $('c2bExpObj').addEventListener('click', () => this.exportWire('obj'));
+    UI.$('c2bInterpN').addEventListener('change', () => { if (this.modelBuilt) this.buildModel(true); });
     ['c2bWfInter', 'c2bWfComp', 'c2bWfShow'].forEach(id => $(id).addEventListener('change', () => { if (this.modelBuilt) this.buildWire(); }));
     $('c2bIfcSplit').addEventListener('change', () => this.modelDirty());
     $('c2bSave').addEventListener('click', () => this.saveProject());
@@ -859,10 +930,13 @@ const APP = {
     $('c2bTab3d').addEventListener('click', () => this.setMode('3d'));
     $('c2bTabPlan').addEventListener('click', () => this.setMode('plan'));
     $('c2bFit').addEventListener('click', () => { if (this.mode === '3d') this.v3d && this.v3d.fit(); else this.plan.fit(); });
-    [['c2bShowCloud', 'cloud'], ['c2bShowSecs', 'sections'], ['c2bShowModel', 'model']].forEach(([id, g]) => $(id).addEventListener('click', () => {
+    [['c2bShowCloud', 'cloud'], ['c2bShowSecs', 'sections'], ['c2bShowAreas', 'areas'], ['c2bShowModel', 'model'], ['c2bShowInterp', 'interp']].forEach(([id, g]) => $(id).addEventListener('click', () => {
       const on = $(id).getAttribute('aria-pressed') !== 'true';
       $(id).setAttribute('aria-pressed', on);
-      if (this.v3d) { this.v3d.setVisible(g, on); if (g === 'model') this.v3d.setVisible('wire', on); }
+      if (!this.v3d) return;
+      this.v3d.setVisible(g, on);
+      if (g === 'model') this.v3d.setVisible('wire', on);
+      if (g === 'areas' && on) this.refreshSections3d();
     }));
     const slice = () => { this.plan.sliceZ = parseFloat($('c2bSliceZ').value); this.plan.sliceDz = UI.num('c2bSliceDz', 0); this.plan.render(); };
     $('c2bSliceZ').addEventListener('input', slice); $('c2bSliceDz').addEventListener('input', slice);
@@ -877,24 +951,39 @@ const APP = {
     $('c2bRefit').addEventListener('click', () => this.refit());
     $('c2bSecFit').addEventListener('click', () => this.ed.fit());
     $('c2bClosed').addEventListener('change', e => {
-      const s = this.curSec(); if (!s) return;
-      this.pushUndo(); s.profile.closed = e.target.checked && s.profile.vertices.length >= 3;
-      const n = s.profile.vertices.length;
-      s.components = s.components.filter(c => C2B.sec.componentEdges(c, n, s.profile.closed).length > 0 && (s.profile.closed || c.end > c.start));
-      this.ed.update(); this.onProfileChanged(s);
+      const s = this.curSec(), P = this.curProf(); if (!s || !P) return;
+      this.pushUndo(); P.closed = e.target.checked && P.vertices.length >= 3;
+      const n = P.vertices.length;
+      P.components = P.components.filter(c => C2B.sec.componentEdges(c, n, P.closed).length > 0 && (P.closed || c.end > c.start));
+      this.ed.update(); this.onActiveProfile(); this.onProfileChanged(s);
     });
     $('c2bClear').addEventListener('click', () => {
+      const s = this.curSec(); if (!s || !this.curProf()) return;
+      this.pushUndo();
+      this.profs(s).splice(this.ed.pi, 1);
+      this.ed.pi = Math.max(0, this.ed.pi - 1);
+      this.ed.update(); this.onActiveProfile(); this.onProfileChanged(s);
+    });
+    $('c2bProfSel').addEventListener('change', e => this.ed.setActive(+e.target.value));
+    $('c2bMaxGap').addEventListener('change', e => {
       const s = this.curSec(); if (!s) return;
-      this.pushUndo(); s.profile = { vertices: [], closed: true }; s.components = [];
-      this.ed.update(); this.onProfileChanged(s);
+      const v = parseFloat(e.target.value);
+      if (!(v > 0)) { e.target.value = Math.round(this.maxGap(s) * 100); return; }
+      s.maxGap = v / 100;
+      UI.log(`${s.name}: max. Punktabstand ${v} cm – «Vorschlag» neu ausführen, um die Profile neu zu bilden.`);
+    });
+    $('c2bMaxGapAll').addEventListener('click', () => {
+      const s = this.curSec(); if (!s) return;
+      this.project.sections.forEach(x => { x.maxGap = this.maxGap(s); });
+      UI.log(`Max. Punktabstand ${Math.round(this.maxGap(s) * 100)} cm für alle ${this.project.sections.length} Querschnitte übernommen.`);
     });
     $('c2bCompAuto').addEventListener('click', () => this.suggestCurrent());
     $('c2bCompAdd').addEventListener('click', () => this.addComponentFromEdges());
     const comp = $('c2bComp');
     comp.addEventListener('change', e => {
-      const tr = e.target.closest('tr[data-i]'), f = e.target.dataset.f, s = this.curSec();
-      if (!tr || !f || !s) return;
-      const c = s.components[+tr.dataset.i];
+      const tr = e.target.closest('tr[data-i]'), f = e.target.dataset.f, s = this.curSec(), P = this.curProf();
+      if (!tr || !f || !s || !P) return;
+      const c = P.components[+tr.dataset.i];
       this.pushUndo();
       if (f === 'name') {
         const nm = e.target.value.trim() || c.name;
@@ -905,15 +994,15 @@ const APP = {
       this.renderComp(); this.ed.render(); this.modelDirty(); this.renderSecList();
     });
     comp.addEventListener('click', e => {
-      const tr = e.target.closest('tr[data-i]'), s = this.curSec();
-      if (!tr || !s) return;
-      const c = s.components[+tr.dataset.i];
+      const tr = e.target.closest('tr[data-i]'), s = this.curSec(), P = this.curProf();
+      if (!tr || !s || !P) return;
+      const c = P.components[+tr.dataset.i];
       if (e.target.dataset.f === 'del') {
-        this.pushUndo(); s.components.splice(+tr.dataset.i, 1);
+        this.pushUndo(); P.components.splice(+tr.dataset.i, 1);
         this.renderComp(); this.ed.render(); this.modelDirty(); this.updateAll(); return;
       }
       // Kanten des Bauteils hervorheben
-      const ce = C2B.sec.componentEdges(c, s.profile.vertices.length, s.profile.closed);
+      const ce = C2B.sec.componentEdges(c, P.vertices.length, P.closed);
       if (ce.length) { this.ed.edgeSel = { a: ce[0], b: ce[ce.length - 1] }; this.ed.render(); }
       comp.querySelectorAll('tr').forEach(r => r.classList.toggle('sel', r === tr));
     });

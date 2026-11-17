@@ -4,7 +4,7 @@ C2B.model = (() => {
   const DEFAULT_T = { floor: 0.30, wall: 0.30, ceiling: 0.30 };
 
   function validSections(sections) {
-    return sections.filter(s => s.profile && s.profile.vertices && s.profile.vertices.length >= 2)
+    return sections.filter(s => sec.profilesOf(s).some(p => p.vertices.length >= 2))
       .slice().sort((a, b) => a.station - b.station);
   }
 
@@ -16,16 +16,16 @@ C2B.model = (() => {
     const S = validSections(sections);
     const out = new Map(S.map(s => [s.id, {}]));
     const names = new Set();
-    S.forEach(s => (s.components || []).forEach(c => names.add(c.name)));
+    S.forEach(s => sec.allComponents(s).forEach(c => names.add(c.name)));
     for (const name of names) {
       const known = [];
       let type = 'wall';
       S.forEach(s => {
-        const c = (s.components || []).find(c => c.name === name);
+        const c = sec.allComponents(s).find(c => c.name === name);
         if (c) { type = c.type; if (c.thickness !== null && c.thickness !== '' && isFinite(c.thickness)) known.push([s.station, +c.thickness]); }
       });
       S.forEach(s => {
-        const c = (s.components || []).find(c => c.name === name);
+        const c = sec.allComponents(s).find(c => c.name === name);
         if (!c) return;
         let t;
         if (c.thickness !== null && c.thickness !== '' && isFinite(c.thickness)) t = +c.thickness;
@@ -49,7 +49,18 @@ C2B.model = (() => {
    * (Gehrung), damit keine Lücken/Überlappungen entstehen.
    */
   function sectionRings(s, tmap) {
-    const V = s.profile.vertices, closed = !!s.profile.closed && V.length >= 3;
+    const out = {};
+    sec.profilesOf(s).forEach((P, pi) => {
+      if (P.vertices.length < 2) return;
+      const r = profileRings(P, tmap);
+      Object.keys(r).forEach(k => { r[k].profileIndex = pi; out[k] = r[k]; });
+    });
+    return out;
+  }
+
+  /** Ringe der Bauteile eines Teilprofils { vertices, closed, components }. */
+  function profileRings(s, tmap) {
+    const V = s.vertices, closed = !!s.closed && V.length >= 3;
     const nV = V.length;
     const E = g2.edges(V, closed);
     const ne = E.length;
@@ -166,7 +177,7 @@ C2B.model = (() => {
     const T = resolveThicknesses(project.sections);
     const per = S.map(s => sectionRings(s, T.get(s.id)));
     const names = [];
-    S.forEach(s => (s.components || []).forEach(c => { if (!names.includes(c.name)) names.push(c.name); }));
+    S.forEach(s => sec.allComponents(s).forEach(c => { if (!names.includes(c.name)) names.push(c.name); }));
     const solids = [], warnings = [];
     for (const name of names) {
       // zusammenhängende Läufe von Querschnitten mit diesem Bauteil
@@ -289,35 +300,48 @@ C2B.model = (() => {
     const S = validSections(project.sections);
     const lines = [], warnings = [];
     const meshV = [], meshF = [];
-    let prev = null;
-    S.forEach((s, j) => {
-      const closed = !!s.profile.closed && s.profile.vertices.length >= 3;
-      let V = s.profile.vertices.map(p => p.slice());
-      if (prev) {
-        let m = Math.max(prev.V.length, V.length);
-        let A = prev.V, B = V;
-        if (prev.closed !== closed) warnings.push(`${prev.s.name} / ${s.name}: offenes und geschlossenes Profil – Längskanten übersprungen.`);
-        else {
-          if (A.length !== B.length) {
-            warnings.push(`${prev.s.name} (${A.length} Ecken) / ${s.name} (${B.length} Ecken): Eckenzahl verschieden – Ecken wurden ergänzt. Tipp: «Profil übernehmen» für gleiche Topologie.`);
-            A = g2.densify(A, m, closed); B = g2.densify(B, m, closed);
+    // Teilprofile benachbarter Querschnitte über den Schwerpunkt zuordnen (z. B. zwei Tunnelröhren)
+    const centroid = (s, P) => { let u = 0, v = 0; P.vertices.forEach(q => { u += q[0]; v += q[1]; }); const n = P.vertices.length || 1; return sec.uvToWorld(s, [u / n, v / n]); };
+    let prevList = [];
+    S.forEach(s => {
+      const cur = [];
+      sec.profilesOf(s).forEach(P => {
+        if (P.vertices.length < 2) return;
+        const closed = !!P.closed && P.vertices.length >= 3;
+        let V = P.vertices.map(p => p.slice());
+        const c = centroid(s, P);
+        // nächstes freies Teilprofil im Vorgänger
+        let prev = null, bd = Infinity;
+        prevList.forEach(q => { if (q.used) return; const d = Math.hypot(q.c[0] - c[0], q.c[1] - c[1], q.c[2] - c[2]); if (d < bd) { bd = d; prev = q; } });
+        if (prev && bd > 5 * Math.max(1, Math.abs(s.station - prev.s.station))) prev = null;   // zu weit weg: kein Partner
+        if (prev) {
+          prev.used = true;
+          const m = Math.max(prev.V.length, V.length);
+          let A = prev.V, B = V;
+          if (prev.closed !== closed) warnings.push(`${prev.s.name} / ${s.name}: offenes und geschlossenes Profil – Längskanten übersprungen.`);
+          else {
+            if (A.length !== B.length) {
+              warnings.push(`${prev.s.name} (${A.length} Ecken) / ${s.name} (${B.length} Ecken): Eckenzahl verschieden – Ecken wurden ergänzt. Tipp: «Profil auf alle» für gleiche Topologie.`);
+              A = g2.densify(A, m, closed); B = g2.densify(B, m, closed);
+            }
+            B = alignCyclic(A, B, closed);
+            const A3 = A.map(p => sec.uvToWorld(prev.s, p)), B3 = B.map(p => sec.uvToWorld(s, p));
+            for (let i = 0; i < m; i++) lines.push({ layer: 'C2B_Laengskanten', pts: [A3[i], B3[i]], closed: false });
+            for (let k = 1; k <= intermediate; k++) {
+              const t = k / (intermediate + 1);
+              lines.push({ layer: 'C2B_Zwischenprofile', closed, pts: A3.map((a, i) => a.map((x, cc) => x + t * (B3[i][cc] - x))) });
+            }
+            const base = meshV.length;
+            A3.forEach(p => meshV.push(p)); B3.forEach(p => meshV.push(p));
+            const ne = closed ? m : m - 1;
+            for (let i = 0; i < ne; i++) { const i1 = (i + 1) % m; meshF.push([base + i, base + i1, base + m + i1, base + m + i]); }
+            V = B;   // ausgerichtete Reihenfolge weitergeben
           }
-          B = alignCyclic(A, B, closed);
-          const A3 = A.map(p => sec.uvToWorld(prev.s, p)), B3 = B.map(p => sec.uvToWorld(s, p));
-          for (let i = 0; i < m; i++) lines.push({ layer: 'C2B_Laengskanten', pts: [A3[i], B3[i]], closed: false });
-          for (let k = 1; k <= intermediate; k++) {
-            const t = k / (intermediate + 1);
-            lines.push({ layer: 'C2B_Zwischenprofile', closed, pts: A3.map((a, i) => a.map((x, c) => x + t * (B3[i][c] - x))) });
-          }
-          const base = meshV.length;
-          A3.forEach(p => meshV.push(p)); B3.forEach(p => meshV.push(p));
-          const ne = closed ? m : m - 1;
-          for (let i = 0; i < ne; i++) { const i1 = (i + 1) % m; meshF.push([base + i, base + i1, base + m + i1, base + m + i]); }
-          V = B;   // ausgerichtete Reihenfolge weitergeben
         }
-      }
-      lines.push({ layer: 'C2B_Profile', closed, pts: V.map(p => sec.uvToWorld(s, p)), name: s.name });
-      prev = { s, V, closed };
+        lines.push({ layer: 'C2B_Profile', closed, pts: V.map(p => sec.uvToWorld(s, p)), name: s.name });
+        cur.push({ s, V, closed, c, used: false });
+      });
+      if (cur.length) prevList = cur;
     });
     if (includeComponents) {
       const { solids } = buildSolids(project);
@@ -336,6 +360,26 @@ C2B.model = (() => {
     return { lines, mesh: { verts: meshV, quads: meshF }, warnings };
   }
 
-  return { resolveThicknesses, sectionRings, buildSolids, loftMesh, signedVolume, columnMesh, fitColumn,
+  /**
+   * Interpolierte Bauteilquerschnitte zwischen den definierten Querschnitten (für die Anzeige):
+   * je Volumenkörper und Intervall «perInterval» Zwischenringe als 3D-Polygone.
+   */
+  function interpolatedRings(solids, perInterval = 3) {
+    const out = [];
+    solids.forEach(so => {
+      const m = so.ringSize;
+      for (let j = 0; j < so.nRings - 1; j++) for (let k = 1; k <= perInterval; k++) {
+        const t = k / (perInterval + 1), ring = [];
+        for (let i = 0; i < m; i++) {
+          const a = so.verts[j * m + i], b = so.verts[(j + 1) * m + i];
+          ring.push([a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]), a[2] + t * (b[2] - a[2])]);
+        }
+        out.push({ type: so.type, name: so.baseName, pts: ring });
+      }
+    });
+    return out;
+  }
+
+  return { resolveThicknesses, sectionRings, profileRings, interpolatedRings, buildSolids, loftMesh, signedVolume, columnMesh, fitColumn,
     columnHeightFromCloud, buildWireframe, validSections, alignCyclic, DEFAULT_T };
 })();

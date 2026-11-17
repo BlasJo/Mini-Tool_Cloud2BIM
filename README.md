@@ -1,10 +1,11 @@
 # Cloud2BIM – Punktwolke → IFC (B+S Mini-Tool)
 
-Eigenständige HTML-Datei **`Cloud2BIM_V1_0_0.html`**: im Browser öffnen (Chrome/Edge/Firefox), keine Installation,
+Eigenständige HTML-Datei **`Cloud2BIM_V1_1_0.html`** (aktuelle Fassung; ältere Fassungen bleiben im Ordner): im Browser öffnen (Chrome/Edge/Firefox), keine Installation,
 kein Server, kein Netzzugriff. Alle Bibliotheken sind eingebettet (three.js 0.147, Delaunator, laz-perf).
 
-Zum Ausprobieren: `beispiel/Demo_Durchlass.laz` (synthetischer Durchlass 30 m, Achse
-E 2600512.30 / N 1199830.70 → E 2600538.79 / N 1199844.78, mit Leitung und einer Stütze bei Station 15).
+Zum Ausprobieren:
+- `beispiel/Demo_Durchlass.laz` – Durchlass 30 m, Achse E 2600512.30 / N 1199830.70 → E 2600538.79 / N 1199844.78, mit Leitung und einer Stütze bei Station 15.
+- `beispiel/Demo_Doppelroehre.laz` – zwei Röhren nebeneinander, Achse E 2600700 / N 1199900 → E 2600719.319 / N 1199894.824 (Schnittdicke 100 mm empfohlen, die Demo-Wolke ist dünn).
 
 ## Ablauf
 
@@ -12,8 +13,8 @@ E 2600512.30 / N 1199830.70 → E 2600538.79 / N 1199844.78, mit Leitung und ein
 |---|---|
 | **1 Punktwolke laden** | `.xyz .txt .csv .pts .asc .ply .las .laz .e57` (Farben werden übernommen). Blockweises Einlesen mit optionaler Vorausdünnung, damit auch grosse Scans in den Browser passen. Koordinaten intern lokal, Ursprung auf 100 m gerundet (LV95 bleibt erhalten). |
 | **2 Ausdünnen** | Voxel-Raster (1 Punkt je Würfel, der dem Zentrum nächste) + isolierte Punkte entfernen. |
-| **3 Querschnitte** | *Linienbauwerk:* Achse (Start/Ende als Koordinaten oder im Grundriss gezeichnet, auch als Polylinie) → Querschnitte im **Abstand x** oder **Anzahl n gleichmässig verteilt**. *Einzeln:* Schnittlinie im Grundriss zeichnen. Querschnittspunkte lassen sich nochmals vereinfachen (Raster). **Automatischer Vorschlag** mit einstellbarer **max. Abweichung**: Ordnung der Punkte über den Minimal-Spannbaum, Douglas-Peucker, Geradenausgleich je Kante, Ecken als Geradenschnitt; Kleinteile (Leitungen, Geräte) werden ignoriert. Bei Serien wird der typischste Querschnitt zur Vorlage und auf die anderen übertragen/angepasst → **gleiche Eckenzahl** in allen Schnitten. Jeder Querschnitt ist einzeln bearbeitbar (Ecken ziehen, einfügen, löschen, neu zeichnen, an Punkt fangen, Undo). Abweichung je Kante farbig, Kennzahlen (max, 95 %, Mittel, % in Toleranz). |
-| **4 Bauteile** | Kanten werden Bodenplatte / Wand / Decke zugeordnet (Vorschlag nach Neigung oder Kanten wählen), Stärke je Querschnitt (leer = zwischen Nachbarn **interpoliert**), Stärke nach aussen (umkehrbar). Bauteilfugen auf Gehrung (lückenlos). Volumenkörper = Loft zwischen den Querschnitten. |
+| **3 Querschnitte** | *Linienbauwerk:* Achse (Start/Ende als Koordinaten oder im Grundriss gezeichnet, auch als Polylinie) → Querschnitte im **Abstand x** oder **Anzahl n gleichmässig verteilt**. *Einzeln:* Schnittlinie im Grundriss zeichnen. Querschnittspunkte lassen sich nochmals vereinfachen (Raster). Ein Querschnitt kann **mehrere Teilprofile** haben (z. B. zwei Tunnelröhren): Punkte werden nur bis zum **max. Punktabstand** (je Querschnitt, Vorgabe 20 cm) verbunden. **Automatischer Vorschlag** mit einstellbarer **max. Abweichung**: Ordnung der Punkte über den Minimal-Spannbaum, Douglas-Peucker, Geradenausgleich je Kante, Ecken als Geradenschnitt; Kleinteile (Leitungen, Geräte) werden ignoriert. Bei Serien wird der typischste Querschnitt zur Vorlage und auf die anderen übertragen/angepasst → **gleiche Eckenzahl** in allen Schnitten. Jeder Querschnitt ist einzeln bearbeitbar (Ecken ziehen, einfügen, löschen, neu zeichnen, an Punkt fangen, Undo). Abweichung je Kante farbig, Kennzahlen (max, 95 %, Mittel, % in Toleranz). |
+| **4 Bauteile** | Kanten werden Bodenplatte / Wand / Decke zugeordnet (Vorschlag nach Neigung oder Kanten wählen), Stärke je Querschnitt (leer = zwischen Nachbarn **interpoliert**), Stärke nach aussen (umkehrbar). Bauteilfugen auf Gehrung (lückenlos). Volumenkörper = Loft zwischen den Querschnitten; im 3D laufen die interpolierten Körper, Zwischenquerschnitte und die Bauteilflächen der Querschnitte live mit. |
 | **5 Punktuelle Bauteile** | Stützen: Horizontalschnitt im Grundriss, anklicken → Rechteck (inkl. Drehung) oder Kreis wird in die Punkte eingepasst, Höhe aus den Punkten. Werte editierbar. |
 | **6 Export** | **IFC4** (IfcSlab/IfcWall/IfcColumn, Tessellation bzw. Extrusion, Material, Pset_Cloud2BIM mit Dicke/Stationen/Volumen, Georeferenz via IfcMapConversion, z. B. EPSG:2056). **Drahtmodell** als 3D-DXF (Layer Profile, Längskanten, Zwischenprofile, Bauteil-Aussenkanten) oder OBJ (Linien + vermaschte Innenfläche). **Projekt** als JSON (ohne Punktwolke) speichern/öffnen. |
 
