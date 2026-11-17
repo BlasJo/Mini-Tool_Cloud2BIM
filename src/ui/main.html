@@ -1,0 +1,75 @@
+  <main class="main">
+    <div class="c2b-main" id="c2bMain">
+      <!-- ── links: 3D / Grundriss ── -->
+      <section class="c2b-pane" aria-label="Übersicht">
+        <div class="c2b-bar">
+          <div class="c2b-tb" role="tablist">
+            <button type="button" id="c2bTab3d" aria-pressed="true">3D</button>
+            <button type="button" id="c2bTabPlan" aria-pressed="false">Grundriss</button>
+          </div>
+          <span class="c2b-spacer"></span>
+          <span id="c2bPlanTools" hidden>
+            <label title="Horizontalschnitt: nur Punkte in diesem Höhenbereich zeigen (z. B. für Stützen)">Höhe <input type="number" id="c2bSliceZ" step="0.1"> ± <input type="number" id="c2bSliceDz" step="0.05" value="0" min="0" title="0 = alle Höhen"> m</label>
+          </span>
+          <span id="c2b3dTools" class="c2b-tb">
+            <button type="button" id="c2bShowCloud" aria-pressed="true" title="Punktwolke ein/aus">Punkte</button>
+            <button type="button" id="c2bShowSecs" aria-pressed="true" title="Querschnitte ein/aus">Schnitte</button>
+            <button type="button" id="c2bShowModel" aria-pressed="true" title="Bauteile ein/aus">Modell</button>
+          </span>
+          <button type="button" class="c2b-btn" id="c2bFit" title="Alles zeigen">⤢</button>
+        </div>
+        <div class="c2b-canvas-wrap" id="c2bLeftWrap">
+          <div id="c2b3dHost" style="position:absolute;inset:0"></div>
+          <canvas id="c2bPlan" hidden></canvas>
+          <div class="c2b-hint" id="c2bPlanHint" hidden></div>
+          <div class="c2b-overlay" id="c2bLeftInfo"></div>
+          <div class="c2b-empty" id="c2bLeftEmpty"><b>Noch keine Punktwolke geladen</b>Datei links unter «1 Punktwolke laden» wählen oder hierher ziehen.</div>
+        </div>
+      </section>
+      <div class="c2b-split" id="c2bSplit" title="Breite ziehen"></div>
+      <!-- ── rechts: Querschnitt-Editor ── -->
+      <section class="c2b-pane" aria-label="Querschnitt">
+        <div class="c2b-bar">
+          <button type="button" class="c2b-btn" id="c2bSecPrev" title="Vorheriger Querschnitt (Bild ↑)" disabled>◀</button>
+          <span class="c2b-title" id="c2bSecTitle">Querschnitt</span>
+          <button type="button" class="c2b-btn" id="c2bSecNext" title="Nächster Querschnitt (Bild ↓)" disabled>▶</button>
+          <div class="c2b-tb" role="toolbar" aria-label="Werkzeug">
+            <button type="button" id="c2bToolEdit" aria-pressed="true" title="Ecken ziehen · Doppelklick auf Kante = Ecke einfügen · Entf / Rechtsklick = Ecke löschen">Bearbeiten</button>
+            <button type="button" id="c2bToolDraw" aria-pressed="false" title="Profil neu zeichnen: Ecken anklicken, Klick auf erste Ecke schliesst, Enter beendet offen">Zeichnen</button>
+            <button type="button" id="c2bToolEdges" aria-pressed="false" title="Kanten für Bauteil wählen: Klick = erste Kante, Shift+Klick = letzte Kante">Kanten wählen</button>
+          </div>
+          <span class="c2b-spacer"></span>
+          <button type="button" class="c2b-btn c2b-btn--red" id="c2bAuto" title="Automatischer Profilvorschlag mit der max. Abweichung" disabled>Vorschlag</button>
+          <button type="button" class="c2b-btn" id="c2bFromPrev" title="Profil des vorherigen Querschnitts übernehmen und an diese Punkte anpassen" disabled>Aus Vorgänger</button>
+          <button type="button" class="c2b-btn" id="c2bRefit" title="Aktuelles Profil an die Punkte anpassen (Ecken bleiben erhalten)" disabled>Anpassen</button>
+          <label title="Profil geschlossen"><input type="checkbox" id="c2bClosed" disabled> geschlossen</label>
+          <button type="button" class="c2b-btn" id="c2bClear" title="Profil löschen" disabled>Löschen</button>
+          <button type="button" class="c2b-btn" id="c2bSecFit" title="Ansicht einpassen">⤢</button>
+        </div>
+        <div class="c2b-canvas-wrap" id="c2bSecWrap">
+          <canvas id="c2bSec"></canvas>
+          <div class="c2b-hint" id="c2bSecHint" hidden></div>
+          <div class="c2b-overlay" id="c2bSecInfo"></div>
+          <div class="c2b-legend" id="c2bSecLegend" hidden>
+            <div><i style="background:#2D8653"></i>innerhalb Toleranz</div>
+            <div><i style="background:#D70036"></i>Abweichung zu gross</div>
+          </div>
+          <div class="c2b-empty" id="c2bSecEmpty"><b>Kein Querschnitt gewählt</b>Querschnitte unter «3 Querschnitte» erzeugen oder in der Liste anklicken.</div>
+        </div>
+        <div class="c2b-secstats" id="c2bSecStats" hidden></div>
+        <div class="c2b-comp" id="c2bComp" hidden>
+          <table><thead><tr><th></th><th>Bauteil</th><th>Typ</th><th>Kanten</th><th>Stärke [mm]</th><th title="Stärke nach innen statt nach aussen">umkehren</th><th></th></tr></thead><tbody></tbody></table>
+          <div class="c2b-comp-bar">
+            <button type="button" class="c2b-btn" id="c2bCompAuto" title="Bauteile nach Neigung der Kanten vorschlagen">Bauteile vorschlagen</button>
+            <button type="button" class="c2b-btn" id="c2bCompAdd" title="Neues Bauteil aus den gewählten Kanten (Werkzeug «Kanten wählen»)">+ aus gewählten Kanten</button>
+            <span class="c2b-mute" id="c2bEdgeSel" style="font-size:11px"></span>
+          </div>
+        </div>
+        <div class="c2b-help" id="c2bSecHelp" hidden>
+          <span class="c2b-kbd">Mausrad</span> Zoom · <span class="c2b-kbd">Ziehen</span> verschieben ·
+          <span class="c2b-kbd">Doppelklick</span> Ecke einfügen · <span class="c2b-kbd">Entf</span>/<span class="c2b-kbd">Rechtsklick</span> Ecke löschen ·
+          <span class="c2b-kbd">Shift</span> an Punkt fangen · <span class="c2b-kbd">Strg+Z</span> rückgängig
+        </div>
+      </section>
+    </div>
+  </main>

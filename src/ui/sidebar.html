@@ -1,0 +1,164 @@
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--bs-text-muted);flex-shrink:0;" aria-hidden="true"><circle cx="5" cy="6" r="1"/><circle cx="9" cy="4" r="1"/><circle cx="4" cy="11" r="1"/><circle cx="8" cy="9" r="1"/><path d="M12 21l9-5V8l-9 5z"/><path d="M12 13L3 8"/><path d="M12 13v8"/></svg>
+      <span class="sidebar-brand-label">Punktwolke → BIM</span>
+    </div>
+    <div class="sidebar-content">
+
+      <!-- ═══ 1 Punktwolke laden ═══ -->
+      <details id="c2bStep1" class="c2b-active" open>
+        <summary><span class="c2b-step-no">1</span>Punktwolke laden<span class="c2b-sum-info" id="c2bInfo1"></span></summary>
+        <div class="sec-body">
+          <div class="drop-zone" id="c2bDrop">
+            <div class="dz-label" id="c2bDropLabel">Punktwolke hierher ziehen oder klicken<br>.xyz .txt .csv .pts .asc .ply .las .laz .e57</div>
+            <div class="dz-file" id="c2bDropFile"></div>
+            <input type="file" id="c2bFile" accept=".xyz,.txt,.csv,.pts,.asc,.ply,.las,.laz,.e57">
+          </div>
+          <div class="param c2b-mt" title="Schon beim Einlesen ausdünnen (1 Punkt je Würfel). 0 = alle Punkte übernehmen. Für grosse Scans spart das viel Arbeitsspeicher."><span class="c2b-grow">Vorausdünnung beim Einlesen</span><input type="number" id="c2bPreVoxel" min="0" step="1" value="5"><span class="c2b-unit">mm</span></div>
+          <div class="param" title="Obergrenze der eingelesenen Punkte (Schutz vor Speichermangel)"><span class="c2b-grow">Höchstens</span><input type="number" class="c2b-wide" id="c2bPreMax" min="100000" step="1000000" value="30000000"><span class="c2b-unit">Pkt</span></div>
+          <div class="c2b-stat" id="c2bLoadStat"></div>
+          <button class="sidebar-btn sidebar-btn-secondary c2b-mt" id="c2bAbort" type="button" hidden>Einlesen abbrechen</button>
+        </div>
+      </details>
+
+      <!-- ═══ 2 Ausdünnen ═══ -->
+      <details id="c2bStep2">
+        <summary><span class="c2b-step-no">2</span>Ausdünnen<span class="c2b-sum-info" id="c2bInfo2"></span></summary>
+        <div class="sec-body">
+          <div class="param" title="Rasterweite: je Würfel bleibt ein Punkt (der dem Würfelzentrum nächste)"><span class="c2b-grow">Punktabstand (Voxel)</span><input type="number" id="c2bVoxel" min="0" step="1" value="20"><span class="c2b-unit">mm</span></div>
+          <label class="c2b-check"><input type="checkbox" id="c2bIsoOn" checked><span>Isolierte Punkte entfernen</span></label>
+          <div class="param"><span class="c2b-grow">&nbsp;&nbsp;Suchradius</span><input type="number" id="c2bIsoR" min="1" step="5" value="60"><span class="c2b-unit">mm</span></div>
+          <div class="param"><span class="c2b-grow">&nbsp;&nbsp;mind. Nachbarn</span><input type="number" id="c2bIsoN" min="1" step="1" value="3"><span class="c2b-unit"></span></div>
+          <div class="btn-row">
+            <button class="sidebar-btn sidebar-btn-primary" id="c2bThin" type="button" disabled>Ausdünnen</button>
+            <button class="sidebar-btn sidebar-btn-secondary" id="c2bThinReset" type="button" disabled title="Zurück zur eingelesenen Punktwolke">Zurücksetzen</button>
+          </div>
+          <div class="c2b-stat" id="c2bThinStat"></div>
+        </div>
+      </details>
+
+      <!-- ═══ 3 Querschnitte ═══ -->
+      <details id="c2bStep3">
+        <summary><span class="c2b-step-no">3</span>Querschnitte<span class="c2b-sum-info" id="c2bInfo3"></span></summary>
+        <div class="sec-body">
+          <div class="c2b-sub">Linienbauwerk: Querschnitte entlang Achse</div>
+          <div class="btn-row">
+            <button class="sidebar-btn sidebar-btn-secondary" id="c2bAxisDraw" type="button" disabled title="Im Grundriss Start- und Endpunkt (weitere Punkte möglich) anklicken, Doppelklick oder Enter beendet">Achse im Grundriss zeichnen</button>
+          </div>
+          <div class="param c2b-mt"><span style="width:38px">Start</span><input type="number" class="c2b-wide" id="c2bAxS_E" step="0.01" placeholder="E"><input type="number" class="c2b-wide" id="c2bAxS_N" step="0.01" placeholder="N"></div>
+          <div class="param"><span style="width:38px">Ende</span><input type="number" class="c2b-wide" id="c2bAxE_E" step="0.01" placeholder="E"><input type="number" class="c2b-wide" id="c2bAxE_N" step="0.01" placeholder="N"></div>
+          <div class="c2b-note" id="c2bAxisInfo">Koordinaten global (z. B. LV95). Achsrichtung = Blickrichtung der Querschnitte.</div>
+          <div class="c2b-seg" role="group" aria-label="Verteilung">
+            <button type="button" id="c2bModeSpacing" aria-pressed="true">Abstand</button>
+            <button type="button" id="c2bModeCount" aria-pressed="false">Anzahl</button>
+          </div>
+          <div class="param" id="c2bRowSpacing"><span class="c2b-grow">Abstand</span><input type="number" id="c2bSpacing" min="0.01" step="0.5" value="5"><span class="c2b-unit">m</span></div>
+          <div class="param" id="c2bRowCount" hidden><span class="c2b-grow">Anzahl (gleichmässig)</span><input type="number" id="c2bCount" min="1" step="1" value="10"><span class="c2b-unit"></span></div>
+          <div class="param"><span class="c2b-grow">Station Start</span><input type="number" id="c2bStation0" step="1" value="0"><span class="c2b-unit">m</span></div>
+          <div class="param" title="Dicke der Scheibe, aus der die Punkte eines Querschnitts stammen"><span class="c2b-grow">Schnittdicke</span><input type="number" id="c2bDepth" min="1" step="1" value="50"><span class="c2b-unit">mm</span></div>
+          <label class="c2b-check"><input type="checkbox" id="c2bAutoOnGen" checked><span>Profile gleich vorschlagen (1. automatisch, weitere aus Vorlage angepasst)</span></label>
+          <div class="btn-row">
+            <button class="sidebar-btn sidebar-btn-primary" id="c2bGen" type="button" disabled>Querschnitte erzeugen</button>
+          </div>
+          <div class="c2b-sub">Einzelner Querschnitt</div>
+          <div class="btn-row">
+            <button class="sidebar-btn sidebar-btn-secondary" id="c2bCutDraw" type="button" disabled title="Im Grundriss zwei Punkte der Schnittlinie anklicken">Schnittlinie zeichnen</button>
+          </div>
+          <div class="c2b-sub">Querschnitt-Profil</div>
+          <div class="param" title="Zulässige Abweichung des Profils von den Punkten (automatischer Vorschlag und Kontrolle)"><span class="c2b-grow">Max. Abweichung</span><input type="number" id="c2bTol" min="1" step="1" value="20"><span class="c2b-unit">mm</span></div>
+          <div class="param" title="Rasterweite, mit der die Querschnittspunkte für Anzeige und Vorschlag vereinfacht werden (0 = alle)"><span class="c2b-grow">Punkte vereinfachen</span><input type="number" id="c2bSecCell" min="0" step="1" value="5"><span class="c2b-unit">mm</span></div>
+          <div class="btn-row">
+            <button class="sidebar-btn sidebar-btn-secondary" id="c2bAutoAll" type="button" disabled title="Für alle Querschnitte ohne Profil einen automatischen Vorschlag erzeugen">Vorschlag für leere</button>
+            <button class="sidebar-btn sidebar-btn-secondary" id="c2bPropagate" type="button" disabled title="Profil des aktuellen Querschnitts auf alle anderen übertragen und dort an die Punkte anpassen (gleiche Eckenzahl = sauberes Drahtmodell)">Profil auf alle</button>
+          </div>
+          <div class="c2b-list" id="c2bSecList"><table><thead><tr><th>Name</th><th>Station</th><th>Ecken</th><th>Max. Abw.</th><th></th></tr></thead><tbody></tbody></table></div>
+          <div class="btn-row">
+            <button class="sidebar-btn sidebar-btn-secondary" id="c2bSecDel" type="button" disabled>Querschnitt löschen</button>
+            <button class="sidebar-btn sidebar-btn-secondary" id="c2bSecDelAll" type="button" disabled>Alle löschen</button>
+          </div>
+        </div>
+      </details>
+
+      <!-- ═══ 4 Bauteile ═══ -->
+      <details id="c2bStep4">
+        <summary><span class="c2b-step-no">4</span>Bauteile (Platte, Wand, Decke)<span class="c2b-sum-info" id="c2bInfo4"></span></summary>
+        <div class="sec-body">
+          <div class="c2b-note">Bauteile werden je Querschnitt einer Kantenfolge zugeordnet (Tabelle unter dem Querschnitt). Die Stärke wirkt nach aussen; leere Stärke = zwischen den Nachbarquerschnitten interpoliert.</div>
+          <div class="c2b-sub">Standardstärken</div>
+          <div class="param"><span class="c2b-grow">Bodenplatte</span><input type="number" id="c2bTFloor" min="1" step="10" value="300"><span class="c2b-unit">mm</span></div>
+          <div class="param"><span class="c2b-grow">Wand</span><input type="number" id="c2bTWall" min="1" step="10" value="300"><span class="c2b-unit">mm</span></div>
+          <div class="param"><span class="c2b-grow">Decke</span><input type="number" id="c2bTCeil" min="1" step="10" value="300"><span class="c2b-unit">mm</span></div>
+          <div class="param" title="Kanten, die steiler als dieser Winkel sind, werden als Wand vorgeschlagen"><span class="c2b-grow">Wand ab Neigung</span><input type="number" id="c2bWallAng" min="1" max="89" step="1" value="35"><span class="c2b-unit">°</span></div>
+          <div class="btn-row">
+            <button class="sidebar-btn sidebar-btn-secondary" id="c2bCompAutoAll" type="button" disabled title="Für alle Querschnitte ohne Bauteile automatisch zuordnen">Vorschlag für alle</button>
+            <button class="sidebar-btn sidebar-btn-secondary" id="c2bCompCopy" type="button" disabled title="Bauteile des aktuellen Querschnitts auf alle mit gleicher Eckenzahl übertragen">Auf alle übertragen</button>
+          </div>
+          <label class="c2b-check"><input type="checkbox" id="c2bCompCopyInterp"><span>Beim Übertragen Stärke leer lassen (interpolieren)</span></label>
+          <div class="btn-row">
+            <button class="sidebar-btn sidebar-btn-primary" id="c2bBuild" type="button" disabled>3D-Modell erzeugen</button>
+          </div>
+          <div class="c2b-stat" id="c2bBuildStat"></div>
+        </div>
+      </details>
+
+      <!-- ═══ 5 Punktuelle Bauteile ═══ -->
+      <details id="c2bStep5">
+        <summary><span class="c2b-step-no">5</span>Punktuelle Bauteile (Stützen)<span class="c2b-sum-info" id="c2bInfo5"></span></summary>
+        <div class="sec-body">
+          <div class="c2b-note">Im Grundriss die Höhe des Horizontalschnitts wählen und die Stütze anklicken. Das Tool passt Kreis oder Rechteck in die Punkte ein.</div>
+          <div class="param"><span class="c2b-grow">Querschnitt</span><select id="c2bColShape"><option value="auto">automatisch</option><option value="rect">Rechteck</option><option value="circle">Kreis</option></select></div>
+          <div class="param" title="Suchradius um den Klick"><span class="c2b-grow">Suchradius</span><input type="number" id="c2bColR" min="50" step="50" value="600"><span class="c2b-unit">mm</span></div>
+          <label class="c2b-check"><input type="checkbox" id="c2bColFit" checked><span>In Punkte einpassen (sonst Standardmass)</span></label>
+          <div class="param"><span class="c2b-grow">Standard b × h / Ø</span><input type="number" id="c2bColB" min="10" step="10" value="400"><input type="number" id="c2bColH" min="10" step="10" value="400"><span class="c2b-unit">mm</span></div>
+          <div class="btn-row">
+            <button class="sidebar-btn sidebar-btn-primary" id="c2bColPlace" type="button" disabled>Stütze platzieren</button>
+          </div>
+          <div class="c2b-list" id="c2bColList"><table><thead><tr><th>Name</th><th>Form</th><th>UK</th><th>OK</th><th></th></tr></thead><tbody></tbody></table></div>
+          <div id="c2bColEdit"></div>
+        </div>
+      </details>
+
+      <!-- ═══ 6 Export ═══ -->
+      <details id="c2bStep6">
+        <summary><span class="c2b-step-no">6</span>Export<span class="c2b-sum-info" id="c2bInfo6"></span></summary>
+        <div class="sec-body">
+          <div class="c2b-sub">IFC-Modell (IFC4)</div>
+          <div class="param"><span style="width:62px">Projekt</span><input type="text" id="c2bIfcProject" value="Cloud2BIM"></div>
+          <div class="param"><span style="width:62px">Bauwerk</span><input type="text" id="c2bIfcBuilding" value="Bauwerk"></div>
+          <div class="param"><span style="width:62px">Material</span><input type="text" id="c2bIfcMat" value="Beton"></div>
+          <div class="param" title="Bezugssystem der Koordinaten (IfcMapConversion)"><span style="width:62px">Bezug</span><input type="text" id="c2bIfcCrs" value="EPSG:2056"></div>
+          <div class="param"><span class="c2b-grow">Bauteile</span><select id="c2bIfcSplit"><option value="durchgehend">durchgehend</option><option value="abschnitt">je Abschnitt</option></select></div>
+          <button class="sidebar-btn sidebar-btn-primary c2b-mt" id="c2bExpIfc" type="button" disabled>IFC exportieren</button>
+          <div class="c2b-sub">Drahtmodell</div>
+          <div class="param" title="Linear interpolierte Zwischenprofile je Intervall"><span class="c2b-grow">Zwischenprofile</span><input type="number" id="c2bWfInter" min="0" max="50" step="1" value="0"><span class="c2b-unit"></span></div>
+          <label class="c2b-check"><input type="checkbox" id="c2bWfComp" checked><span>Aussenkanten der Bauteile</span></label>
+          <label class="c2b-check"><input type="checkbox" id="c2bWfShow" checked><span>Drahtmodell im 3D zeigen</span></label>
+          <div class="btn-row">
+            <button class="sidebar-btn sidebar-btn-secondary" id="c2bExpDxf" type="button" disabled>DXF (3D)</button>
+            <button class="sidebar-btn sidebar-btn-secondary" id="c2bExpObj" type="button" disabled title="Linien + Flächennetz der Innenfläche">OBJ</button>
+          </div>
+          <div class="c2b-sub">Projekt</div>
+          <div class="btn-row">
+            <button class="sidebar-btn sidebar-btn-secondary" id="c2bSave" type="button" disabled title="Querschnitte, Bauteile, Stützen und Einstellungen als JSON speichern (ohne Punktwolke)">Speichern</button>
+            <button class="sidebar-btn sidebar-btn-secondary" id="c2bOpen" type="button" title="Projektdatei (.c2b.json) öffnen">Öffnen…</button>
+            <input type="file" id="c2bOpenFile" accept=".json" hidden>
+          </div>
+        </div>
+      </details>
+
+      <div class="sidebar-progress-wrap" id="progress-wrap"><div class="sidebar-progress-bar" id="progress-bar"></div></div>
+      <div class="sidebar-progress-text" id="progress-text"></div>
+    </div>
+
+{{DRAWER_HEAD}}
+      <div class="settings-drawer-body">
+        <div class="c2b-sub">Darstellung</div>
+        <div class="param" title="Höchstzahl der Punkte im 3D-Viewer und Grundriss (Ausdünnung nur für die Anzeige)"><span class="c2b-grow">Anzeige max. Punkte</span><input type="number" class="c2b-wide" id="c2bDispMax" min="100000" step="100000" value="1500000"></div>
+        <div class="param"><span class="c2b-grow">Punktgrösse 3D</span><input type="number" id="c2bPtSize" min="1" max="10" step="1" value="2"><span class="c2b-unit">px</span></div>
+        <div class="param"><span class="c2b-grow">Einfärbung</span><select id="c2bColorMode"><option value="rgb">Farbe (RGB)</option><option value="height">Höhe</option></select></div>
+        <div class="c2b-sub">Profil-Werkzeuge</div>
+        <div class="param" title="Suchbereich beim Anpassen einer Vorlage an einen anderen Querschnitt"><span class="c2b-grow">Suchbereich Vorlage</span><input type="number" id="c2bFitSearch" min="10" step="10" value="150"><span class="c2b-unit">mm</span></div>
+        <div class="param" title="Punkte weiter weg vom Profil gelten als Fremdobjekte (Einbauten) und zählen nicht zur Abweichung"><span class="c2b-grow">Fremdobjekte ab</span><input type="number" id="c2bBand" min="10" step="10" value="100"><span class="c2b-unit">mm</span></div>
+        <div class="c2b-note">Werte werden lokal im Browser gespeichert (nur Einstellungen, keine Projektdaten).</div>
+{{DRAWER_LOG}}
+  </aside>

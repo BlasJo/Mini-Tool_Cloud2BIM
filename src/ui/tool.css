@@ -1,0 +1,124 @@
+  /* ═══ Cloud2BIM — Tool-Styles (Praefix c2b-) ═══ */
+  .c2b-step-no {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; border-radius: 50%;
+    background: var(--bs-gray-200); color: var(--bs-text-secondary);
+    font-size: 9.5px; font-weight: 700; letter-spacing: 0; flex-shrink: 0;
+  }
+  .sidebar details.c2b-done > summary .c2b-step-no { background: var(--bs-success); color: #fff; }
+  .sidebar details.c2b-active > summary .c2b-step-no { background: var(--bs-red); color: #fff; }
+  .c2b-sum-info { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--bs-text-muted); }
+
+  .sidebar .param input[type="text"] {
+    background: var(--bs-gray-50); color: var(--bs-text-primary); border: 1px solid var(--bs-border);
+    border-radius: 3px; padding: 3px 6px; font-size: 12px; flex: 1; min-width: 0; font-family: inherit;
+  }
+  .sidebar .param input[type="number"].c2b-wide { width: 104px; }
+  .sidebar .param .c2b-grow { flex: 1; }
+  .sidebar .param .c2b-unit { color: var(--bs-text-muted); font-size: 11px; width: 22px; }
+  .c2b-sub { font-size: 10px; text-transform: uppercase; letter-spacing: .7px; color: var(--bs-text-muted); font-weight: 600; margin: 10px 0 5px; }
+  .c2b-sub:first-child { margin-top: 0; }
+  .c2b-note { font-size: 11px; color: var(--bs-text-muted); line-height: 1.45; margin: 4px 0; }
+  .c2b-note b { color: var(--bs-text-secondary); }
+  .c2b-stat { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; color: var(--bs-text-secondary); margin: 4px 0; line-height: 1.5; }
+  .c2b-check { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; color: var(--bs-text-secondary); margin: 4px 0; cursor: pointer; }
+  .c2b-check input { margin-top: 2px; accent-color: var(--bs-red); }
+  .sidebar .btn-row { margin-top: 6px; }
+  .sidebar .c2b-mt { margin-top: 6px; }
+  .c2b-seg { display: flex; border: 1px solid var(--bs-border); border-radius: var(--bs-radius-sm); overflow: hidden; margin: 4px 0; }
+  .c2b-seg button { flex: 1; border: none; background: var(--bs-gray-50); color: var(--bs-text-secondary); font-size: 11.5px; padding: 4px 6px; cursor: pointer; font-family: inherit; }
+  .c2b-seg button + button { border-left: 1px solid var(--bs-border); }
+  .c2b-seg button[aria-pressed="true"] { background: var(--bs-red); color: #fff; }
+
+  .c2b-list { max-height: 220px; overflow-y: auto; border: 1px solid var(--bs-border-light); border-radius: var(--bs-radius-sm); margin-top: 6px; }
+  .c2b-list table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .c2b-list th { position: sticky; top: 0; background: var(--bs-gray-50); color: var(--bs-text-muted); font-weight: 600; text-align: left; padding: 3px 5px; font-size: 10px; }
+  .c2b-list td { padding: 3px 5px; border-top: 1px solid var(--bs-border-light); white-space: nowrap; }
+  .c2b-list tr { cursor: pointer; }
+  .c2b-list tr:hover td { background: var(--bs-gray-50); }
+  .c2b-list tr.sel td { background: var(--bs-red-pale); color: var(--bs-text-primary); font-weight: 600; }
+  .c2b-ok { color: var(--bs-success); }
+  .c2b-bad { color: var(--bs-red); }
+  .c2b-mute { color: var(--bs-text-muted); }
+
+  /* ═══ Hauptbereich: links 3D/Grundriss, rechts Querschnitt ═══ */
+  .c2b-main { position: absolute; inset: 0; display: grid; grid-template-columns: minmax(0, var(--c2b-left, 1fr)) 6px minmax(0, var(--c2b-right, 1fr)); }
+  .c2b-pane { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bs-white); }
+  .c2b-split { cursor: col-resize; background: var(--bs-border-light); }
+  .c2b-split:hover, .c2b-split.drag { background: var(--bs-red); }
+  .c2b-bar {
+    display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--bs-border-light);
+    background: var(--bs-white); flex-wrap: wrap; min-height: 40px;
+  }
+  .c2b-bar .c2b-title { font-size: 12px; font-weight: 700; color: var(--bs-text-primary); margin-right: 4px; white-space: nowrap; }
+  .c2b-tb { display: inline-flex; border: 1px solid var(--bs-border); border-radius: var(--bs-radius-sm); overflow: hidden; }
+  .c2b-tb button, .c2b-btn {
+    border: none; background: var(--bs-gray-50); color: var(--bs-text-secondary); font-size: 11.5px; padding: 4px 8px;
+    cursor: pointer; font-family: inherit; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px;
+  }
+  .c2b-btn { border: 1px solid var(--bs-border); border-radius: var(--bs-radius-sm); }
+  .c2b-tb button + button { border-left: 1px solid var(--bs-border); }
+  .c2b-tb button:hover:not(:disabled), .c2b-btn:hover:not(:disabled) { background: var(--bs-gray-100); color: var(--bs-text-primary); }
+  .c2b-tb button[aria-pressed="true"] { background: var(--bs-red); color: #fff; }
+  .c2b-btn--red { background: var(--bs-red); border-color: var(--bs-red); color: #fff; }
+  .c2b-btn--red:hover:not(:disabled) { background: var(--bs-red-dark) !important; color: #fff !important; }
+  .c2b-tb button:disabled, .c2b-btn:disabled { opacity: .4; cursor: not-allowed; }
+  .c2b-bar .c2b-spacer { flex: 1; }
+  .c2b-bar select, .c2b-bar input[type="number"] {
+    background: var(--bs-gray-50); color: var(--bs-text-primary); border: 1px solid var(--bs-border); border-radius: 3px;
+    padding: 3px 5px; font-size: 11.5px; font-family: inherit;
+  }
+  .c2b-bar input[type="number"] { width: 64px; text-align: right; font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .c2b-bar label { font-size: 11px; color: var(--bs-text-muted); display: inline-flex; align-items: center; gap: 4px; }
+  .c2b-canvas-wrap { position: relative; flex: 1; min-height: 0; overflow: hidden; background: var(--bs-warm-bg); }
+  .c2b-canvas-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .c2b-canvas-wrap.c2b-dark { background: #1d1f22; }
+  .c2b-overlay {
+    position: absolute; left: 10px; bottom: 8px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px;
+    color: var(--bs-text-secondary); background: color-mix(in srgb, var(--bs-white) 85%, transparent);
+    padding: 3px 7px; border-radius: var(--bs-radius-sm); pointer-events: none; max-width: calc(100% - 20px);
+  }
+  .c2b-hint {
+    position: absolute; left: 50%; top: 10px; transform: translateX(-50%); background: var(--bs-anthracite); color: #fff;
+    font-size: 11.5px; padding: 5px 10px; border-radius: var(--bs-radius-sm); pointer-events: none; box-shadow: var(--bs-shadow-md);
+    max-width: 90%; text-align: center;
+  }
+  .c2b-hint[hidden] { display: none; }
+  .c2b-empty {
+    position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 6px; color: var(--bs-text-muted); font-size: 12.5px; text-align: center; padding: 30px; pointer-events: none;
+  }
+  .c2b-empty b { color: var(--bs-text-secondary); font-size: 13.5px; }
+  .c2b-empty[hidden] { display: none; }
+  .c2b-legend { position: absolute; right: 10px; top: 10px; font-size: 11px; background: color-mix(in srgb, var(--bs-white) 88%, transparent);
+    border: 1px solid var(--bs-border-light); border-radius: var(--bs-radius-sm); padding: 5px 8px; color: var(--bs-text-secondary); pointer-events: none; }
+  .c2b-legend div { display: flex; align-items: center; gap: 6px; line-height: 1.6; }
+  .c2b-legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; }
+
+  /* ═══ Querschnitt: Kennzahlen + Bauteiltabelle ═══ */
+  .c2b-secstats { display: flex; gap: 14px; flex-wrap: wrap; padding: 5px 10px; font-size: 11px; color: var(--bs-text-secondary);
+    border-top: 1px solid var(--bs-border-light); background: var(--bs-white); font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .c2b-secstats b { color: var(--bs-text-primary); }
+  .c2b-comp { border-top: 1px solid var(--bs-border-light); background: var(--bs-white); max-height: 34%; overflow-y: auto; }
+  .c2b-comp table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  .c2b-comp th { position: sticky; top: 0; background: var(--bs-gray-50); text-align: left; padding: 4px 6px; font-size: 10px; color: var(--bs-text-muted); font-weight: 600; z-index: 1; }
+  .c2b-comp td { padding: 2px 6px; border-top: 1px solid var(--bs-border-light); }
+  .c2b-comp input, .c2b-comp select {
+    background: transparent; color: var(--bs-text-primary); border: 1px solid transparent; border-radius: 3px; padding: 2px 4px; font-size: 11.5px; font-family: inherit; width: 100%;
+  }
+  .c2b-comp input:hover, .c2b-comp select:hover { border-color: var(--bs-border); }
+  .c2b-comp input:focus, .c2b-comp select:focus { outline: none; border-color: var(--bs-red); background: var(--bs-gray-50); }
+  .c2b-comp input[type="number"] { text-align: right; font-family: ui-monospace, Menlo, Consolas, monospace; width: 74px; }
+  .c2b-comp input[type="checkbox"] { width: auto; accent-color: var(--bs-red); }
+  .c2b-comp .c2b-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: middle; }
+  .c2b-comp tr.sel td { background: var(--bs-red-pale); }
+  .c2b-comp .c2b-x { border: none; background: none; color: var(--bs-text-muted); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 4px; }
+  .c2b-comp .c2b-x:hover { color: var(--bs-red); }
+  .c2b-comp-bar { display: flex; gap: 6px; align-items: center; padding: 5px 8px; flex-wrap: wrap; border-top: 1px solid var(--bs-border-light); }
+  .c2b-kbd { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 10px; border: 1px solid var(--bs-border); border-bottom-width: 2px; border-radius: 3px; padding: 0 4px; background: var(--bs-gray-50); }
+  .c2b-help { font-size: 11px; color: var(--bs-text-muted); padding: 4px 10px 6px; line-height: 1.6; background: var(--bs-white); border-top: 1px solid var(--bs-border-light); }
+  [data-theme="dark"] .c2b-canvas-wrap { background: #18181a; }
+  /* hidden-Attribut hat Vorrang vor display-Regeln der Tool-Klassen */
+  .c2b-main [hidden], .sidebar [hidden] { display: none !important; }
+  .sidebar .param select { width: auto; max-width: 150px; text-align: left; font-family: inherit; }
+  .sidebar .param input[type="number"].c2b-wide { width: 118px; }
