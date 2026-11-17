@@ -28,7 +28,7 @@ await step('Ausdünnen', async () => {
 });
 await page.screenshot({ path: path.join(out, 'e2e_1_geladen.png') });
 await step('Querschnitte entlang Achse (Abstand 5 m)', async () => {
-  await page.click('#c2bStep3 summary');
+  await page.click('#c2bStep4 summary');
   await page.fill('#c2bAxS_E', '2600512.3'); await page.fill('#c2bAxS_N', '1199830.7');
   await page.fill('#c2bAxE_E', '2600538.788'); await page.fill('#c2bAxE_N', '1199844.784');
   await page.fill('#c2bSpacing', '5');
@@ -39,7 +39,7 @@ const secInfo = await page.evaluate(() => window.BSTool.APP.sortedSecs().map(s =
 console.log('  Querschnitte:', JSON.stringify(secInfo));
 await step('Bauteile vorschlagen + übertragen', async () => {
   await page.click('#c2bCompAuto');
-  await page.click('#c2bStep4 summary');
+  await page.click('#c2bStep5 summary');
   await page.click('#c2bCompCopy');
 });
 await step('3D-Modell', async () => { await page.click('#c2bBuild'); });
@@ -50,7 +50,7 @@ await page.click('#c2bShowCloud'); await page.click('#c2bFit'); await page.waitF
 await page.screenshot({ path: path.join(out, 'e2e_2b_modell_ohne_punkte.png'), clip: { x: 300, y: 68, width: 650, height: 850 } });
 await page.click('#c2bShowCloud');
 await step('Stütze im Grundriss einpassen', async () => {
-  await page.click('#c2bStep5 summary');
+  await page.click('#c2bStep6 summary');
   await page.click('#c2bColPlace');
   // Stützenmitte bei Station 15 auf der Achse
   const pt = await page.evaluate(() => {
@@ -83,8 +83,68 @@ await step('Querschnitt-Editor: Ecke einfügen + Undo', async () => {
   const n2 = await page.evaluate(() => window.BSTool.APP.curProf().vertices.length);
   if (n2 !== n0) throw new Error('Undo fehlgeschlagen');
 });
+// ── Ausschneiden, Ebene, Maske
+const clickPlan = async pts => {
+  for (const [E, N] of pts) {
+    const p = await page.evaluate(([E, N]) => { const A = window.BSTool.APP, o = A.project.offset;
+      const [x, y] = A.plan.toScreen(E - o[0], N - o[1]); const r = document.getElementById('c2bPlan').getBoundingClientRect(); return { x: r.left + x, y: r.top + y }; }, [E, N]);
+    await page.mouse.click(p.x, p.y);
+  }
+  await page.keyboard.press('Enter');
+};
+// Punkt auf der Achse: Station s, Abstand q nach links (+) / rechts (-)
+const ax = (st, q) => { const a = 28 * Math.PI / 180; return [2600512.3 + st * Math.cos(a) - q * Math.sin(a), 1199830.7 + st * Math.sin(a) + q * Math.cos(a)]; };
+await step('Ausschneiden: Bereich um die Stütze entfernen', async () => {
+  await page.evaluate(() => { document.getElementById('c2bStep2').open = true; });
+  await page.evaluate(() => { const A = window.BSTool.APP; A.setMode('plan'); A.plan.fit(); });
+  const n0 = await page.evaluate(() => window.BSTool.APP.cloud.n);
+  await page.click('#c2bCropRemove');
+  await clickPlan([ax(14.5, 0.5), ax(15.5, 0.5), ax(15.5, -0.5), ax(14.5, -0.5)]);
+  await page.waitForFunction(() => window.BSTool.APP.project.crops.length === 1);
+  const n1 = await page.evaluate(() => window.BSTool.APP.cloud.n);
+  console.log('   Punkte', n0, '->', n1);
+  if (!(n1 < n0)) throw new Error('nichts ausgeschnitten');
+  const dev15 = await page.evaluate(() => { const A = window.BSTool.APP, s = A.sortedSecs().find(x => x.station === 15); return A.devOf(s).max; });
+  console.log('   max. Abweichung QS 15 nach Ausschnitt:', (dev15 * 1000).toFixed(1), 'mm');
+  if (dev15 > 0.03) throw new Error('Stützenpunkte noch im Querschnitt');
+});
+await step('Ebene: Boden einpassen und in Querschnitte übernehmen', async () => {
+  await page.evaluate(() => { document.getElementById('c2bStep3').open = true; });
+  await page.selectOption('#c2bPlKind', 'horizontal');
+  await page.fill('#c2bPlZ0', ''); await page.fill('#c2bPlZ1', '512.8');
+  await page.click('#c2bPlDraw');
+  await clickPlan([ax(-0.5, 1.7), ax(30.5, 1.7), ax(30.5, -1.7), ax(-0.5, -1.7)]);
+  await page.waitForFunction(() => window.BSTool.APP.project.planes.length === 1);
+  const r = await page.evaluate(() => {
+    const A = window.BSTool.APP, pl = A.project.planes[0], C = window.BSTool.C2B;
+    let worst = 0;
+    A.project.sections.forEach(s => { const V = s.profiles[0].vertices; const lo = V.slice().sort((a, b) => a[1] - b[1]).slice(0, 2);
+      lo.forEach(v => { const w = C.sec.uvToWorld(s, v); worst = Math.max(worst, Math.abs(pl.n[0] * w[0] + pl.n[1] * w[1] + pl.n[2] * w[2] - pl.c)); }); });
+    return { kind: pl.kind, rms: pl.rms, tilt: pl.tilt, worst };
+  });
+  console.log('   Ebene:', JSON.stringify(r));
+  if (r.worst > 1e-4) throw new Error('Bodenecken liegen nicht auf der Ebene');
+});
+await step('Maske im Querschnitt', async () => {
+  await page.evaluate(() => { const A = window.BSTool.APP; A.selectSection(A.sortedSecs()[1].id); });
+  const n0 = await page.evaluate(() => window.BSTool.APP.ed.pts.length);
+  await page.click('#c2bToolMask');
+  const pts = await page.evaluate(() => { const A = window.BSTool.APP, r = document.getElementById('c2bSec').getBoundingClientRect();
+    const V = A.curProf().vertices, u0 = Math.min(...V.map(p => p[0])), v0 = Math.min(...V.map(p => p[1]));
+    return [[u0 - 0.2, v0 - 0.2], [u0 + 1, v0 - 0.2], [u0 + 1, v0 + 1], [u0 - 0.2, v0 + 1]].map(([u, v]) => { const [x, y] = A.ed.toS(u, v); return [r.left + x, r.top + y]; }); });
+  for (const [x, y] of pts) await page.mouse.click(x, y);
+  await page.keyboard.press('Enter');
+  const n1 = await page.evaluate(() => window.BSTool.APP.ed.pts.length);
+  console.log('   Punkte im Querschnitt', n0, '->', n1);
+  if (!(n1 < n0)) throw new Error('Maske wirkt nicht');
+  await page.keyboard.press('Escape');
+  await page.screenshot({ path: path.join(out, 'e2e_8_maske_ebene.png') });
+  await page.keyboard.press('Control+z');
+  const n2 = await page.evaluate(() => window.BSTool.APP.ed.pts.length);
+  if (n2 !== n0) throw new Error('Undo Maske');
+});
 await page.click('#c2bTab3d');
-await page.click('#c2bStep6 summary');
+await page.click('#c2bStep7 summary');
 for (const [btn, name] of [['#c2bExpIfc', 'demo.ifc'], ['#c2bExpDxf', 'demo.dxf'], ['#c2bExpObj', 'demo.obj'], ['#c2bSave', 'demo.c2b.json']]) {
   await step('Export ' + name, async () => {
     const [dl] = await Promise.all([page.waitForEvent('download'), page.click(btn)]);

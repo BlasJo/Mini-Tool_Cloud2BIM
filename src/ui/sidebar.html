@@ -23,7 +23,7 @@
 
       <!-- ═══ 2 Ausdünnen ═══ -->
       <details id="c2bStep2">
-        <summary><span class="c2b-step-no">2</span>Ausdünnen<span class="c2b-sum-info" id="c2bInfo2"></span></summary>
+        <summary><span class="c2b-step-no">2</span>Ausdünnen &amp; Ausschneiden<span class="c2b-sum-info" id="c2bInfo2"></span></summary>
         <div class="sec-body">
           <div class="param" title="Rasterweite: je Würfel bleibt ein Punkt (der dem Würfelzentrum nächste)"><span class="c2b-grow">Punktabstand (Voxel)</span><input type="number" id="c2bVoxel" min="0" step="1" value="20"><span class="c2b-unit">mm</span></div>
           <label class="c2b-check"><input type="checkbox" id="c2bIsoOn" checked><span>Isolierte Punkte entfernen</span></label>
@@ -34,12 +34,37 @@
             <button class="sidebar-btn sidebar-btn-secondary" id="c2bThinReset" type="button" disabled title="Zurück zur eingelesenen Punktwolke">Zurücksetzen</button>
           </div>
           <div class="c2b-stat" id="c2bThinStat"></div>
+          <div class="c2b-sub">Ausschneiden (Grundriss)</div>
+          <div class="c2b-note">Bereich im Grundriss als Polygon zeichnen (Doppelklick/Enter beendet). Nur Punkte im Höhenbereich zählen; leer = alle Höhen.</div>
+          <div class="param"><span class="c2b-grow">Höhe von / bis</span><input type="number" id="c2bCropZ0" step="0.1" placeholder="alle"><input type="number" id="c2bCropZ1" step="0.1" placeholder="alle"><span class="c2b-unit">m</span></div>
+          <div class="btn-row">
+            <button class="sidebar-btn sidebar-btn-secondary" id="c2bCropKeep" type="button" disabled title="Nur die Punkte innerhalb des Polygons behalten">Bereich behalten…</button>
+            <button class="sidebar-btn sidebar-btn-secondary" id="c2bCropRemove" type="button" disabled title="Punkte innerhalb des Polygons entfernen (z. B. Fahrzeuge, Einbauten)">Bereich entfernen…</button>
+          </div>
+          <div class="c2b-list" id="c2bCropList" hidden><table><thead><tr><th>Bereich</th><th>Art</th><th>Höhe</th><th></th></tr></thead><tbody></tbody></table></div>
+          <div class="c2b-stat" id="c2bCropStat"></div>
+        </div>
+      </details>
+
+      <!-- ═══ 3 Ebenen ═══ -->
+      <details id="c2bStep3">
+        <summary><span class="c2b-step-no">3</span>Ebenen (optional)<span class="c2b-sum-info" id="c2bInfo3"></span></summary>
+        <div class="sec-body">
+          <div class="c2b-note">Ebene Fläche (Boden, Wand, Decke) im Grundriss umfahren; das Tool passt eine Ebene in die Punkte ein. Ihre Schnittlinien werden in die Querschnitte übernommen.</div>
+          <div class="param"><span class="c2b-grow">Lage</span><select id="c2bPlKind"><option value="auto">automatisch</option><option value="horizontal">horizontal</option><option value="vertical">vertikal</option></select></div>
+          <div class="param" title="Punkte bis zu diesem Abstand gelten als auf der Ebene"><span class="c2b-grow">Toleranz Ebene</span><input type="number" id="c2bPlTol" min="1" step="1" value="10"><span class="c2b-unit">mm</span></div>
+          <div class="param"><span class="c2b-grow">Höhe von / bis</span><input type="number" id="c2bPlZ0" step="0.1" placeholder="alle"><input type="number" id="c2bPlZ1" step="0.1" placeholder="alle"><span class="c2b-unit">m</span></div>
+          <button class="sidebar-btn sidebar-btn-primary c2b-mt" id="c2bPlDraw" type="button" disabled>Ebene aus Bereich…</button>
+          <div class="c2b-list" id="c2bPlList" hidden><table><thead><tr><th>Ebene</th><th>Lage</th><th>RMS</th><th>Punkte</th><th></th></tr></thead><tbody></tbody></table></div>
+          <label class="c2b-check c2b-mt"><input type="checkbox" id="c2bPlAuto" checked><span>Ebenen automatisch in die Querschnitte übernehmen</span></label>
+          <div class="param" title="Profilkanten, die näher und (fast) parallel zu einer Ebenen-Schnittlinie liegen, übernehmen deren Lage"><span class="c2b-grow">Fangabstand</span><input type="number" id="c2bPlSnap" min="5" step="10" value="100"><span class="c2b-unit">mm</span></div>
+          <button class="sidebar-btn sidebar-btn-secondary c2b-mt" id="c2bPlApplyAll" type="button" disabled>Auf alle Querschnitte anwenden</button>
         </div>
       </details>
 
       <!-- ═══ 3 Querschnitte ═══ -->
-      <details id="c2bStep3">
-        <summary><span class="c2b-step-no">3</span>Querschnitte<span class="c2b-sum-info" id="c2bInfo3"></span></summary>
+      <details id="c2bStep4">
+        <summary><span class="c2b-step-no">4</span>Querschnitte<span class="c2b-sum-info" id="c2bInfo4"></span></summary>
         <div class="sec-body">
           <div class="c2b-sub">Linienbauwerk: Querschnitte entlang Achse</div>
           <div class="btn-row">
@@ -80,8 +105,8 @@
       </details>
 
       <!-- ═══ 4 Bauteile ═══ -->
-      <details id="c2bStep4">
-        <summary><span class="c2b-step-no">4</span>Bauteile (Platte, Wand, Decke)<span class="c2b-sum-info" id="c2bInfo4"></span></summary>
+      <details id="c2bStep5">
+        <summary><span class="c2b-step-no">5</span>Bauteile (Platte, Wand, Decke)<span class="c2b-sum-info" id="c2bInfo5"></span></summary>
         <div class="sec-body">
           <div class="c2b-note">Bauteile werden je Querschnitt einer Kantenfolge zugeordnet (Tabelle unter dem Querschnitt). Die Stärke wirkt nach aussen; leere Stärke = zwischen den Nachbarquerschnitten interpoliert.</div>
           <div class="c2b-sub">Standardstärken</div>
@@ -102,8 +127,8 @@
       </details>
 
       <!-- ═══ 5 Punktuelle Bauteile ═══ -->
-      <details id="c2bStep5">
-        <summary><span class="c2b-step-no">5</span>Punktuelle Bauteile (Stützen)<span class="c2b-sum-info" id="c2bInfo5"></span></summary>
+      <details id="c2bStep6">
+        <summary><span class="c2b-step-no">6</span>Punktuelle Bauteile (Stützen)<span class="c2b-sum-info" id="c2bInfo6"></span></summary>
         <div class="sec-body">
           <div class="c2b-note">Im Grundriss die Höhe des Horizontalschnitts wählen und die Stütze anklicken. Das Tool passt Kreis oder Rechteck in die Punkte ein.</div>
           <div class="param"><span class="c2b-grow">Querschnitt</span><select id="c2bColShape"><option value="auto">automatisch</option><option value="rect">Rechteck</option><option value="circle">Kreis</option></select></div>
@@ -119,8 +144,8 @@
       </details>
 
       <!-- ═══ 6 Export ═══ -->
-      <details id="c2bStep6">
-        <summary><span class="c2b-step-no">6</span>Export<span class="c2b-sum-info" id="c2bInfo6"></span></summary>
+      <details id="c2bStep7">
+        <summary><span class="c2b-step-no">7</span>Export<span class="c2b-sum-info" id="c2bInfo7"></span></summary>
         <div class="sec-body">
           <div class="c2b-sub">IFC-Modell (IFC4)</div>
           <div class="param"><span style="width:62px">Projekt</span><input type="text" id="c2bIfcProject" value="Cloud2BIM"></div>

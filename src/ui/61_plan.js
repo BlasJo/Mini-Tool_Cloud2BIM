@@ -27,8 +27,12 @@ UI.PlanView = class {
   toScreen(x, y) { const w = this.cv.clientWidth, h = this.cv.clientHeight; return [w / 2 + (x - this.cx) * this.scale, h / 2 - (y - this.cy) * this.scale]; }
   toWorld(px, py) { const w = this.cv.clientWidth, h = this.cv.clientHeight; return [this.cx + (px - w / 2) / this.scale, this.cy - (py - h / 2) / this.scale]; }
 
+  /** Polygon zeichnen (Doppelklick/Enter beendet), danach cb(poly). */
+  drawPolygon(hint, cb) { this.setMode('poly', hint); this.polyCb = cb; }
+
   setMode(mode, hint) {
     this.mode = mode; this.temp = [];
+    if (mode !== 'poly') this.polyCb = null;
     const el = UI.$('c2bPlanHint');
     el.hidden = !hint; el.textContent = hint || '';
     this.cv.style.cursor = mode === 'pan' ? 'grab' : 'crosshair';
@@ -71,6 +75,21 @@ UI.PlanView = class {
 
   _drawOverlay(ctx) {
     const app = this.app, P = app.project;
+    const path = pts => { ctx.beginPath(); pts.forEach((p, i) => { const [x, y] = this.toScreen(p[0], p[1]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.closePath(); };
+    // Ausschnitt-Bereiche
+    (P.crops || []).forEach(r => {
+      path(r.poly);
+      ctx.fillStyle = r.mode === 'keep' ? 'rgba(45,134,83,0.08)' : 'rgba(215,0,54,0.12)'; ctx.fill();
+      ctx.strokeStyle = r.mode === 'keep' ? '#2D8653' : '#D70036'; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]); ctx.stroke(); ctx.setLineDash([]);
+    });
+    // Ebenen (Umriss der Ebenenfläche im Grundriss)
+    (P.planes || []).forEach(pl => {
+      path(C2B.planes.planeCorners(pl));
+      ctx.fillStyle = 'rgba(31,111,178,0.10)'; ctx.fill();
+      ctx.strokeStyle = '#1f6fb2'; ctx.lineWidth = 1.5; ctx.stroke();
+      const c = this.toScreen(pl.p0[0], pl.p0[1]);
+      ctx.fillStyle = '#1f6fb2'; ctx.font = '11px system-ui, sans-serif'; ctx.fillText(pl.name, c[0] + 4, c[1] - 4);
+    });
     // Achse
     const axis = P.axis || [];
     if (axis.length >= 2) {
@@ -119,7 +138,9 @@ UI.PlanView = class {
       ctx.beginPath();
       this.temp.forEach((p, i) => { const [x, y] = this.toScreen(p[0], p[1]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
       const [mx, my] = this.toScreen(this.mouse[0], this.mouse[1]);
-      ctx.lineTo(mx, my); ctx.stroke();
+      ctx.lineTo(mx, my);
+      if (this.mode === 'poly') { const [fx, fy] = this.toScreen(this.temp[0][0], this.temp[0][1]); ctx.lineTo(fx, fy); }
+      ctx.stroke();
       if (this.mode === 'cut' && this.temp.length === 1) {
         const a = this.temp[0], b = this.mouse;
         const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
@@ -197,7 +218,7 @@ UI.PlanView = class {
       cv.style.cursor = this.mode === 'pan' ? 'grab' : 'crosshair';
       if (!d || d.moved || d.button !== 0) return;
       const [px, py] = pos(e), w = this.toWorld(px, py);
-      if (this.mode === 'axis') { this.temp.push(w); this.render(); }
+      if (this.mode === 'axis' || this.mode === 'poly') { this.temp.push(w); this.render(); }
       else if (this.mode === 'cut') {
         this.temp.push(w);
         if (this.temp.length === 2) { const t = this.temp; this.setMode('pan'); this.app.onCutDrawn(t[0], t[1]); }
@@ -211,13 +232,27 @@ UI.PlanView = class {
     });
     cv.addEventListener('dblclick', e => {
       if (this.mode === 'axis') { e.preventDefault(); this._finishAxis(); }
+      else if (this.mode === 'poly') { e.preventDefault(); this._finishPoly(); }
     });
     window.addEventListener('keydown', e => {
       if (cv.hidden || e.target.closest && e.target.closest('input,select,textarea')) return;
       if (this.mode === 'axis' && e.key === 'Enter') this._finishAxis();
+      if (this.mode === 'poly' && e.key === 'Enter') this._finishPoly();
       if (this.mode !== 'pan' && e.key === 'Escape') { this.setMode('pan'); this.app.onPlanModeEnd(); }
     });
     new ResizeObserver(() => this.render()).observe(cv);
+  }
+
+  _dedup() {
+    const pts = [];
+    this.temp.forEach(p => { if (!pts.length || Math.hypot(p[0] - pts[pts.length - 1][0], p[1] - pts[pts.length - 1][1]) > 1e-6) pts.push(p); });
+    return pts;
+  }
+
+  _finishPoly() {
+    const pts = this._dedup(), cb = this.polyCb;
+    this.setMode('pan');
+    if (pts.length >= 3 && cb) cb(pts); else this.app.onPlanModeEnd();
   }
 
   _finishAxis() {

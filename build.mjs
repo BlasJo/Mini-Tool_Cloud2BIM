@@ -5,7 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 
 const ROOT = path.dirname(new URL(import.meta.url).pathname);
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const DATE = '17.11.2026';
 const TOOL = 'Cloud2BIM';
 const rd = p => fs.readFileSync(path.join(ROOT, p), 'utf8');
@@ -56,6 +56,10 @@ Koordinaten intern lokal (x/y abzueglich Ursprung auf 100 m gerundet, Float32), 
 IFC lokal mit IfcMapConversion (Bezugssystem einstellbar, Vorgabe EPSG:2056).
 Mindest-Browser: aktuelles Chrome, Edge oder Firefox (WebGL, WebAssembly).
 
+Aenderungen V1.2.0: Ausschneiden der Punktwolke im Grundriss (Polygon + Hoehenbereich, behalten/entfernen,
+  im Projekt gespeichert und rueckgaengig machbar); Ausblenden unklarer Punkte je Querschnitt (Masken, auf
+  alle Querschnitte uebertragbar); Ebenen aus Bereichen der Punktwolke einpassen (RANSAC + Ausgleich),
+  Anzeige in 3D/Grundriss/Querschnitt und Uebernahme der Schnittlinien in die Profile.
 Aenderungen V1.1.0: Teilprofile je Querschnitt (z. B. zwei Tunnelroehren); der automatische Vorschlag
   verbindet nur Punkte bis zum max. Punktabstand (je Querschnitt einstellbar, Vorgabe 20 cm).
   3D: interpolierte Volumenkoerper laufen live mit (inkl. Zwischenquerschnitte), definierte

@@ -17,6 +17,7 @@
             <button type="button" id="c2bShowAreas" aria-pressed="true" title="Definierte Bauteilflächen in den Querschnitten ein/aus">Flächen</button>
             <button type="button" id="c2bShowModel" aria-pressed="true" title="Interpolierte Volumenkörper ein/aus">Modell</button>
             <button type="button" id="c2bShowInterp" aria-pressed="true" title="Interpolierte Zwischenquerschnitte der Volumenkörper ein/aus">Interpolation</button>
+            <button type="button" id="c2bShowPlanes" aria-pressed="true" title="Ebenen ein/aus">Ebenen</button>
           </span>
           <button type="button" class="c2b-btn" id="c2bFit" title="Alles zeigen">⤢</button>
         </div>
@@ -39,6 +40,7 @@
             <button type="button" id="c2bToolEdit" aria-pressed="true" title="Ecken ziehen · Doppelklick auf Kante = Ecke einfügen · Entf / Rechtsklick = Ecke löschen">Bearbeiten</button>
             <button type="button" id="c2bToolDraw" aria-pressed="false" title="Neues Teilprofil zeichnen: Ecken anklicken, Klick auf erste Ecke schliesst, Enter beendet offen">Zeichnen</button>
             <button type="button" id="c2bToolEdges" aria-pressed="false" title="Kanten für Bauteil wählen: Klick = erste Kante, Shift+Klick = letzte Kante">Kanten wählen</button>
+            <button type="button" id="c2bToolMask" aria-pressed="false" title="Punkte ausblenden: Polygon um unklare Punkte zeichnen (Doppelklick/Enter beendet); sie zählen für Vorschlag und Abweichung nicht">Ausblenden</button>
           </div>
           <span class="c2b-spacer"></span>
           <button type="button" class="c2b-btn c2b-btn--red" id="c2bAuto" title="Automatischer Profilvorschlag mit der max. Abweichung" disabled>Vorschlag</button>
@@ -49,6 +51,11 @@
           <button type="button" class="c2b-btn" id="c2bClear" title="Aktives Teilprofil löschen" disabled>Löschen</button>
           <label title="Max. Punktabstand: der Vorschlag verbindet nur Punkte, die höchstens so weit auseinanderliegen. Grössere Lücken trennen Teilprofile (z. B. zwei Tunnelröhren).">max. Abstand <input type="number" id="c2bMaxGap" min="1" step="5" value="20"> cm</label>
           <button type="button" class="c2b-btn" id="c2bMaxGapAll" title="Max. Punktabstand dieses Querschnitts für alle Querschnitte übernehmen">für alle</button>
+          <span class="c2b-tb">
+            <button type="button" id="c2bMaskAll" title="Ausblend-Polygone dieses Querschnitts auf alle Querschnitte übertragen (gleiche Lage relativ zur Achse)" disabled>Masken auf alle</button>
+            <button type="button" id="c2bMaskClear" title="Ausblend-Polygone dieses Querschnitts löschen" disabled>Masken löschen</button>
+          </span>
+          <button type="button" class="c2b-btn" id="c2bPlApply" title="Ebenen-Schnittlinien in die Profile dieses Querschnitts übernehmen" disabled>Ebenen anwenden</button>
           <button type="button" class="c2b-btn" id="c2bSecFit" title="Ansicht einpassen">⤢</button>
         </div>
         <div class="c2b-canvas-wrap" id="c2bSecWrap">

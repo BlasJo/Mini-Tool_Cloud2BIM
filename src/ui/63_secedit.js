@@ -35,11 +35,12 @@ UI.SectionEditor = class {
   }
 
   setTool(t) {
-    this.tool = t; this.drawing = t === 'draw' ? [] : null; this.edgeSel = t === 'edges' ? this.edgeSel : null;
+    this.tool = t; this.drawing = (t === 'draw' || t === 'mask') ? [] : null; this.edgeSel = t === 'edges' ? this.edgeSel : null;
     const hint = UI.$('c2bSecHint');
     hint.hidden = t === 'edit';
     hint.textContent = t === 'draw' ? 'Neues Teilprofil: Ecken anklicken · Klick auf erste Ecke = geschlossen · Enter = offen beenden · Esc = abbrechen'
-      : t === 'edges' ? 'Kante anklicken = Anfang · Shift+Klick = Ende des Bereichs · danach «+ aus gewählten Kanten»' : '';
+      : t === 'edges' ? 'Kante anklicken = Anfang · Shift+Klick = Ende des Bereichs · danach «+ aus gewählten Kanten»'
+      : t === 'mask' ? 'Ausblenden: Polygon um die unklaren Punkte zeichnen · Klick auf ersten Punkt, Doppelklick oder Enter beendet · Esc = abbrechen' : '';
     this.cv.style.cursor = t === 'edit' ? 'default' : 'crosshair';
     this.app.onEdgeSelection(this.edgeSel);
     this.render();
@@ -94,6 +95,16 @@ UI.SectionEditor = class {
       ctx.beginPath(); poly.forEach((p, i) => { const [x, y] = this.toS(p[0], p[1]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
       ctx.closePath(); ctx.fill(); ctx.stroke();
     });
+    // Ausblend-Masken
+    (this.sec.masks || []).forEach(m => {
+      ctx.beginPath(); m.poly.forEach((p, i) => { const [x, y] = this.toS(p[0], p[1]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.closePath();
+      ctx.fillStyle = dark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)'; ctx.fill();
+      ctx.strokeStyle = '#8E8E93'; ctx.lineWidth = 1; ctx.setLineDash([3, 3]); ctx.stroke(); ctx.setLineDash([]);
+    });
+    if (this.hiddenPts && this.hiddenPts.length) {   // ausgeblendete Punkte blass
+      ctx.fillStyle = dark ? 'rgba(200,200,207,0.25)' : 'rgba(58,58,60,0.2)';
+      for (const p of this.hiddenPts) { const [x, y] = this.toS(p[0], p[1]); ctx.fillRect(x - 0.75, y - 0.75, 1.5, 1.5); }
+    }
     // Punkte
     ctx.fillStyle = dark ? '#c9c9cf' : '#3a3a3c';
     const r = Math.max(1, Math.min(2.5, this.scale * 0.004));
@@ -102,6 +113,13 @@ UI.SectionEditor = class {
       if (x < -2 || y < -2 || x > w + 2 || y > h + 2) continue;
       ctx.fillRect(x - r / 2, y - r / 2, r, r);
     }
+    // Ebenen-Schnittlinien
+    (this.planeLines || []).forEach(l => {
+      const [x1, y1] = this.toS(l.a[0], l.a[1]), [x2, y2] = this.toS(l.b[0], l.b[1]);
+      ctx.strokeStyle = '#1f6fb2'; ctx.lineWidth = 1.5; ctx.setLineDash([10, 4, 2, 4]);
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = '#1f6fb2'; ctx.font = '10px system-ui, sans-serif'; ctx.fillText(l.plane.name, (x1 + x2) / 2 + 4, (y1 + y2) / 2 + 12);
+    });
     // Teilprofile
     const profs = this.profiles();
     profs.forEach((P, k) => {
@@ -332,11 +350,11 @@ UI.SectionEditor = class {
       const [px, py] = pos(e);
       let w = this.toW(px, py);
       if (e.shiftKey && this.tool === 'draw') { const q = this._nearestPoint(w[0], w[1]); if (q) w = q.slice(); }
-      if (this.tool === 'draw') {
+      if (this.tool === 'draw' || this.tool === 'mask') {
         const D = this.drawing || (this.drawing = []);
         if (D.length >= 3) {
           const [fx, fy] = this.toS(D[0][0], D[0][1]);
-          if (Math.hypot(fx - px, fy - py) < 9) { this._finishDraw(true); return; }
+          if (Math.hypot(fx - px, fy - py) < 9) { this.tool === 'mask' ? this._finishMask() : this._finishDraw(true); return; }
         }
         D.push(w); this.render();
         return;
@@ -357,6 +375,7 @@ UI.SectionEditor = class {
       }
     });
     cv.addEventListener('dblclick', e => {
+      if (this.sec && this.tool === 'mask') { e.preventDefault(); this._finishMask(); return; }
       if (!this.sec || this.tool !== 'edit' || !this.prof()) return;
       const [px, py] = pos(e);
       if (this._hitVertex(px, py) >= 0) return;
@@ -375,6 +394,7 @@ UI.SectionEditor = class {
       if (!this.sec) return;
       if ((e.key === 'Delete' || e.key === 'Backspace') && this.selV >= 0 && this.tool === 'edit') { e.preventDefault(); this.deleteVertex(this.selV); }
       else if (e.key === 'Enter' && this.tool === 'draw') { e.preventDefault(); this._finishDraw(false); }
+      else if (e.key === 'Enter' && this.tool === 'mask') { e.preventDefault(); this._finishMask(); }
       else if (e.key === 'Escape') { if (this.tool !== 'edit') this.app.setSecTool('edit'); else { this.selV = -1; this.render(); } }
       else if (e.key === 'Tab' && this.profiles().length > 1) { e.preventDefault(); this.setActive((this.pi + (e.shiftKey ? -1 : 1) + this.profiles().length) % this.profiles().length); }
       else if (this.tool === 'edit' && this.selV >= 0 && e.key.startsWith('Arrow')) {
@@ -388,6 +408,15 @@ UI.SectionEditor = class {
       }
     });
     new ResizeObserver(() => this.render()).observe(cv);
+  }
+
+  /** Ausblend-Polygon übernehmen (Doppelklick liefert doppelte Punkte -> entfernen). */
+  _finishMask() {
+    const pts = [];
+    (this.drawing || []).forEach(p => { if (!pts.length || Math.hypot(p[0] - pts[pts.length - 1][0], p[1] - pts[pts.length - 1][1]) > 1e-6) pts.push(p); });
+    this.drawing = [];
+    if (pts.length >= 3) this.app.onMaskDrawn(pts);
+    this.render();
   }
 
   /** Gezeichnetes Profil als neues Teilprofil übernehmen. */

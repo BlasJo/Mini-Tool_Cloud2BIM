@@ -2,6 +2,13 @@
 
 Neueste Fassung zuerst.
 
+## 1.2.0 (17.11.2026)
+
+- **Ausschneiden** (Schritt 2, Grundriss): Polygon zeichnen, «Bereich behalten» oder «Bereich entfernen», optional nur in einem Höhenbereich. Die Bereiche werden im Projekt gespeichert, lassen sich einzeln löschen und rückgängig machen; das Ausdünnen bleibt davon getrennt.
+- **Ausblenden im Querschnitt** (Werkzeug «Ausblenden»): Polygon um unklare Punkte; diese zählen für Vorschlag, Vorlage-Anpassung und Abweichung nicht mehr (blass angezeigt). «Masken auf alle» überträgt die Polygone (Lage relativ zur Achse) auf alle Querschnitte.
+- **Ebenen** (neuer Schritt 3): Bereich im Grundriss umfahren (optional Höhenbereich, Lage automatisch/horizontal/vertikal) → robuste Ebene (RANSAC + Ausgleich) mit RMS und Anteil der Punkte. Anzeige im Grundriss, in 3D (Schalter «Ebenen») und als Schnittlinie in jedem Querschnitt. Profilkanten, die (fast) parallel und innerhalb des Fangabstands liegen, übernehmen die Ebene, Ecken werden neu geschnitten – automatisch bei allen Vorschlägen (abschaltbar) oder per «Ebenen anwenden».
+- Schritte neu nummeriert: 1 Laden · 2 Ausdünnen & Ausschneiden · 3 Ebenen · 4 Querschnitte · 5 Bauteile · 6 Stützen · 7 Export.
+
 ## 1.1.0 (17.11.2026)
 
 - **Teilprofile je Querschnitt** (z. B. zwei Tunnelröhren): Ein Querschnitt kann mehrere Profile haben, jedes mit eigenen Bauteilen («Profil k · Wand links» …). Im Editor wird das aktive Teilprofil bearbeitet (Klick auf ein anderes Profil, Auswahlliste oder Tab wechselt), «Zeichnen» fügt ein Teilprofil hinzu, «Löschen» entfernt das aktive.

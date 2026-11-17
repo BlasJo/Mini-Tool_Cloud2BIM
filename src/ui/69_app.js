@@ -1,7 +1,8 @@
 /* ═══ Cloud2BIM UI: Ablaufsteuerung ═══ */
 const APP = {
   raw: null, cloud: null, display: null, colors: null, zRange: [0, 1],
-  project: { name: 'Cloud2BIM', source: null, offset: null, axis: [], sections: [], columns: [] },
+  project: { name: 'Cloud2BIM', source: null, offset: null, axis: [], sections: [], columns: [], crops: [], planes: [] },
+  thinned: null,   // Punktwolke nach dem Ausdünnen (vor dem Ausschneiden)
   curSecId: null, curColId: null, solids: null, wire: null, modelBuilt: false,
   undo: new UI.Undo(), secPtsCache: new Map(), abort: null, mode: '3d', defaultHalfWidth: 5,
 
@@ -29,12 +30,16 @@ const APP = {
   sortedSecs() { return this.project.sections.slice().sort((a, b) => a.station - b.station); },
 
   // ───────────────────────────────────────────── Undo
-  snapshot() { return { sections: this.project.sections, columns: this.project.columns, axis: this.project.axis, curSecId: this.curSecId }; },
+  snapshot() { const P = this.project; return { sections: P.sections, columns: P.columns, axis: P.axis, crops: P.crops, planes: P.planes, curSecId: this.curSecId }; },
   pushUndo() { this.undo.push(this.snapshot()); },
   dropUndo() { this.undo.stack.pop(); },
   _restore(st) {
     if (!st) return;
+    const cropsChanged = JSON.stringify(st.crops || []) !== JSON.stringify(this.project.crops || []);
     this.project.sections = st.sections; this.project.columns = st.columns; this.project.axis = st.axis || [];
+    this.project.crops = st.crops || []; this.project.planes = st.planes || [];
+    if (cropsChanged) this.applyCrops(true);
+    this.renderCrops(); this.renderPlanes();
     this.curSecId = this.project.sections.some(s => s.id === st.curSecId) ? st.curSecId : (this.project.sections[0] || {}).id || null;
     this.secPtsCache.clear();
     this.selectSection(this.curSecId, true);
@@ -54,7 +59,8 @@ const APP = {
       if (!r) return;
       if (r === 'reset') {
         this.pushUndo();
-        Object.assign(P, { offset: null, axis: [], sections: [], columns: [] });
+        Object.assign(P, { offset: null, axis: [], sections: [], columns: [], crops: [], planes: [] });
+        this.renderCrops(); this.renderPlanes();
         this.curSecId = null; this.curColId = null; this.solids = null; this.modelBuilt = false;
         if (this.v3d) { this.v3d.setModel([], []); this.v3d.setWire([]); }
         ['c2bAxS_E', 'c2bAxS_N', 'c2bAxE_E', 'c2bAxE_N'].forEach(id => { UI.$(id).value = ''; });
@@ -80,7 +86,7 @@ const APP = {
         for (let i = 0; i < cloud.n; i++) for (let k = 0; k < 3; k++) cloud.xyz[i * 3 + k] += d[k];
         cloud.offset = this.project.offset.slice();
       } else this.project.offset = cloud.offset.slice();
-      this.raw = cloud; this.cloud = cloud;
+      this.raw = cloud; this.thinned = cloud; this.cloud = C2B.planes.applyRegions(cloud, this.project.crops);
       this.project.source = file.name;
       this.secPtsCache.clear();
       const dt = ((performance.now() - t0) / 1000).toFixed(1);
@@ -129,7 +135,8 @@ const APP = {
       c = C2B.thin.removeIsolated(c, Math.max(0.001, UI.mm('c2bIsoR', 0.06)), Math.max(1, UI.num('c2bIsoN', 3)));
       removed = n0 - c.n;
     }
-    this.cloud = c;
+    this.thinned = c;
+    this.cloud = C2B.planes.applyRegions(c, this.project.crops);
     this.secPtsCache.clear();
     UI.progress(null);
     const msg = `${UI.fmtInt(this.raw.n)} → ${UI.fmtInt(c.n)} Punkte (${(100 * c.n / this.raw.n).toFixed(1)} %)` + (removed ? `, ${UI.fmtInt(removed)} isolierte entfernt` : '');
@@ -142,13 +149,14 @@ const APP = {
 
   thinReset() {
     if (!this.raw) return;
-    this.cloud = this.raw; this.secPtsCache.clear();
+    this.thinned = this.raw; this.cloud = C2B.planes.applyRegions(this.raw, this.project.crops); this.secPtsCache.clear();
     UI.$('c2bThinStat').textContent = 'Zurückgesetzt auf ' + UI.fmtInt(this.raw.n) + ' Punkte.';
     this.refreshDisplay(false); this.reloadCurrentSectionPoints(); this.updateAll();
   },
 
   // ───────────────────────────────────────────── Querschnitte
-  secPts(s) {
+  /** Alle Punkte der Schnittscheibe (vor den Masken). */
+  secPtsAll(s) {
     if (!this.cloud) return [];
     const cell = UI.mm('c2bSecCell', 0.005);
     const key = [s.id, s.depth, cell, s.origin[0], s.origin[1], s.angle].join('|');
@@ -161,9 +169,156 @@ const APP = {
     return p;
   },
 
+  /** Punkte eines Querschnitts für Vorschlag/Abweichung: ohne ausgeblendete (Masken). */
+  secPts(s) {
+    const all = this.secPtsAll(s);
+    return s.masks && s.masks.length ? C2B.planes.applyMasks(all, s.masks) : all;
+  },
+
+  /** Querschnitt in den Editor laden (sichtbare + ausgeblendete Punkte, Ebenen-Schnittlinien). */
+  edLoad(s, keepView) {
+    if (!s) { this.ed.hiddenPts = []; this.ed.planeLines = []; this.ed.setSection(null, []); return; }
+    const all = this.secPtsAll(s), vis = this.secPts(s);
+    this.ed.hiddenPts = vis.length === all.length ? [] : all.filter(p => !vis.includes(p));
+    this.ed.planeLines = C2B.planes.sectionLines(this.project.planes, s);
+    this.ed.setSection(s, vis, keepView);
+  },
+
   reloadCurrentSectionPoints() {
     const s = this.curSec();
-    if (s) this.ed.setSection(s, this.secPts(s), true);
+    if (s) this.edLoad(s, true);
+  },
+
+  // ───────────────────────────────────────────── Ausschneiden
+  applyCrops(quiet) {
+    if (!this.thinned) return;
+    const n0 = this.thinned.n;
+    this.cloud = C2B.planes.applyRegions(this.thinned, this.project.crops);
+    this.secPtsCache.clear();
+    UI.$('c2bCropStat').textContent = this.project.crops.length ? `${UI.fmtInt(n0)} → ${UI.fmtInt(this.cloud.n)} Punkte nach Ausschnitt` : '';
+    if (!quiet) UI.log(`Ausschnitt: ${this.project.crops.length} Bereich(e), ${UI.fmtInt(this.cloud.n)} von ${UI.fmtInt(n0)} Punkten verbleiben.`);
+    this.refreshDisplay(false);
+    this.reloadCurrentSectionPoints();
+    this.project.sections.forEach(x => this.devOf(x));
+    this.updateAll();
+  },
+
+  cropZ(id0, id1) {
+    const a = parseFloat(UI.$(id0).value), b = parseFloat(UI.$(id1).value);
+    return [isFinite(a) ? a : null, isFinite(b) ? b : null];
+  },
+
+  startCrop(mode) {
+    this.setMode('plan');
+    this.plan.drawPolygon(`Bereich ${mode === 'keep' ? 'behalten' : 'entfernen'}: Polygon anklicken · Doppelklick/Enter beendet · Esc bricht ab`, poly => {
+      const [z0, z1] = this.cropZ('c2bCropZ0', 'c2bCropZ1');
+      this.pushUndo();
+      this.project.crops = this.project.crops.concat([{ id: C2B.sec.uid(), poly, mode, zMin: z0, zMax: z1 }]);
+      this.renderCrops(); this.applyCrops(); this.plan.render();
+    });
+  },
+
+  renderCrops() {
+    const C = this.project.crops || [];
+    UI.$('c2bCropList').hidden = !C.length;
+    UI.$('c2bCropList').querySelector('tbody').innerHTML = C.map((r, i) => `<tr><td>Bereich ${i + 1}</td><td class="${r.mode === 'keep' ? 'c2b-ok' : 'c2b-bad'}">${r.mode === 'keep' ? 'behalten' : 'entfernen'}</td>` +
+      `<td>${r.zMin === null && r.zMax === null ? 'alle' : (r.zMin === null ? '…' : r.zMin.toFixed(1)) + ' – ' + (r.zMax === null ? '…' : r.zMax.toFixed(1))}</td>` +
+      `<td><button class="c2b-x" data-del="${r.id}" title="Bereich entfernen" style="border:none;background:none;cursor:pointer;color:var(--bs-text-muted)">×</button></td></tr>`).join('');
+  },
+
+  // ───────────────────────────────────────────── Masken im Querschnitt
+  onMaskDrawn(poly) {
+    const s = this.curSec(); if (!s) return;
+    this.pushUndo();
+    s.masks = (s.masks || []).concat([{ poly }]);
+    const n0 = this.secPtsAll(s).length, n1 = this.secPts(s).length;
+    UI.log(`${s.name}: ${n0 - n1} Punkte ausgeblendet (${s.masks.length} Maske(n)).`);
+    this.edLoad(s, true); this.renderSecList(); this.updateButtons();
+  },
+
+  masksToAll() {
+    const src = this.curSec(); if (!src || !(src.masks || []).length) return;
+    this.pushUndo();
+    this.project.sections.forEach(s => { if (s !== src) s.masks = JSON.parse(JSON.stringify(src.masks)); });
+    this.project.sections.forEach(s => this.devOf(s));
+    UI.log(`${src.masks.length} Maske(n) von «${src.name}» auf alle Querschnitte übertragen (Lage relativ zur Achse).`);
+    this.renderSecList(); this.updateButtons();
+  },
+
+  masksClear() {
+    const s = this.curSec(); if (!s || !(s.masks || []).length) return;
+    this.pushUndo(); s.masks = [];
+    this.edLoad(s, true); this.renderSecList(); this.updateButtons();
+  },
+
+  // ───────────────────────────────────────────── Ebenen
+  startPlane() {
+    if (!this.cloud) return;
+    this.setMode('plan');
+    this.plan.drawPolygon('Ebene: Bereich der ebenen Fläche umfahren · Doppelklick/Enter beendet · Esc bricht ab', poly => {
+      const [z0, z1] = this.cropZ('c2bPlZ0', 'c2bPlZ1');
+      const pts = C2B.planes.collectRegion(this.cloud, poly, z0, z1);
+      let pl;
+      try { pl = C2B.planes.fitPlane(pts, { tol: Math.max(0.001, UI.mm('c2bPlTol', 0.01)), kind: UI.$('c2bPlKind').value }); }
+      catch (e) { UI.alert('Ebene', e.message); return; }
+      this.pushUndo();
+      const k = (this.project.planes || []).length + 1;
+      Object.assign(pl, { id: C2B.sec.uid(), name: 'Ebene ' + k, poly, zMin: z0, zMax: z1 });
+      this.project.planes = (this.project.planes || []).concat([pl]);
+      UI.log(`${pl.name}: ${pl.kind} (Neigung ${pl.tilt.toFixed(1)}°), ${UI.fmtInt(pl.nInl)} von ${UI.fmtInt(pl.nAll)} Punkten auf der Ebene, RMS ${(pl.rms * 1000).toFixed(1)} mm.`);
+      if (pl.nInl < 0.3 * pl.nAll) UI.log(`${pl.name}: nur ${(100 * pl.nInl / pl.nAll).toFixed(0)} % der Punkte liegen auf der Ebene – Bereich oder Höhe enger wählen.`, 'warn');
+      this.renderPlanes(); this.plan.render();
+      if (UI.$('c2bPlAuto').checked) this.applyPlanesAll(true);
+      else this.reloadCurrentSectionPoints();
+      this.updateAll();
+    });
+  },
+
+  renderPlanes() {
+    const L = this.project.planes || [];
+    UI.$('c2bPlList').hidden = !L.length;
+    UI.$('c2bPlList').querySelector('tbody').innerHTML = L.map(pl => `<tr><td><input type="text" data-pl="${pl.id}" value="${UI.esc(pl.name)}" style="width:90px;border:1px solid transparent;background:transparent;color:inherit;font:inherit"></td>` +
+      `<td>${pl.kind}</td><td>${(pl.rms * 1000).toFixed(1)} mm</td><td>${(100 * pl.nInl / pl.nAll).toFixed(0)} %</td>` +
+      `<td><button class="c2b-x" data-del="${pl.id}" title="Ebene löschen" style="border:none;background:none;cursor:pointer;color:var(--bs-text-muted)">×</button></td></tr>`).join('');
+    if (this.v3d) this.v3d.setPlanes(L);
+  },
+
+  /** Ebenen-Schnittlinien in alle Teilprofile eines Querschnitts übernehmen; liefert Anzahl Kanten. */
+  applyPlanesTo(s) {
+    const lines = C2B.planes.sectionLines(this.project.planes, s);
+    if (!lines.length) return 0;
+    let n = 0;
+    this.profs(s).forEach(P => {
+      const r = C2B.planes.applyToProfile(P, lines, { maxDist: Math.max(0.005, UI.mm('c2bPlSnap', 0.1)) });
+      if (r.applied.length) { P.vertices = r.vertices; n += r.applied.length; }
+    });
+    return n;
+  },
+
+  /** Nach automatischen Vorschlägen: Ebenen übernehmen, falls eingeschaltet. */
+  autoPlanes(secs) {
+    if (!UI.$('c2bPlAuto').checked || !(this.project.planes || []).length) return;
+    let n = 0;
+    secs.forEach(s => { n += this.applyPlanesTo(s); this.devOf(s); });
+    if (n) UI.log(`Ebenen übernommen: ${n} Profilkanten auf Ebenen gelegt.`);
+  },
+
+  applyPlanesAll(skipUndo) {
+    if (!(this.project.planes || []).length) return;
+    if (!skipUndo) this.pushUndo();
+    let n = 0, ns = 0;
+    this.project.sections.forEach(s => { const k = this.applyPlanesTo(s); if (k) { n += k; ns++; } this.devOf(s); });
+    UI.log(`Ebenen auf ${ns} Querschnitte angewendet (${n} Profilkanten).`);
+    this.reloadCurrentSectionPoints(); this.refreshSections3d(); this.modelDirty(); this.updateAll();
+  },
+
+  applyPlanesCurrent() {
+    const s = this.curSec(); if (!s) return;
+    this.pushUndo();
+    const n = this.applyPlanesTo(s);
+    UI.log(n ? `${s.name}: ${n} Profilkante(n) auf Ebenen gelegt.` : `${s.name}: keine Profilkante liegt nahe und parallel zu einer Ebene (Fangabstand ${UI.$('c2bPlSnap').value} mm).`);
+    if (!n) this.dropUndo();
+    this.ed.update(); this.onProfileChanged(s);
   },
 
   axisFromInputs() {
@@ -303,6 +458,7 @@ const APP = {
     const good = auto.map((a, i) => ({ a, i })).filter(x => x.a.prof && x.a.rep.withinTol >= 0.95);
     if (!good.length) {
       S.forEach((s, i) => { if (auto[i].prof) s.profiles = auto[i].prof; });
+      this.autoPlanes(S);
       UI.progress(null); UI.log('Kein Querschnitt mit eindeutigem Profil gefunden – Einzelvorschläge übernommen, bitte prüfen.', 'warn');
       S.forEach(s => this.devOf(s)); this.reloadCurrentSectionPoints(); return;
     }
@@ -328,6 +484,7 @@ const APP = {
       }
     }
     UI.progress(null);
+    this.autoPlanes(S);
     S.forEach(s => this.devOf(s));
     UI.log(`Profile für ${S.length} Querschnitte vorgeschlagen` + (own.length ? `; eigene Topologie (Vorlage passte nicht): ${own.join(', ')}` : '; alle mit gleicher Topologie') + '.');
     if (own.length) UI.log('Querschnitte mit eigener Topologie prüfen – für Drahtmodell und Bauteile ist gleiche Eckenzahl ideal.', 'warn');
@@ -340,10 +497,10 @@ const APP = {
     UI.$('c2bSecEmpty').hidden = !!s;
     UI.$('c2bSecStats').hidden = !s; UI.$('c2bComp').hidden = !s; UI.$('c2bSecHelp').hidden = !s; UI.$('c2bSecLegend').hidden = !s;
     if (s) {
-      this.ed.setSection(s, this.secPts(s), keepView && this.ed.sec && this.ed.sec.id === s.id);
+      this.edLoad(s, keepView && this.ed.sec && this.ed.sec.id === s.id);
       UI.$('c2bSecTitle').textContent = s.name + ' · Station ' + s.station.toFixed(2);
       UI.$('c2bMaxGap').value = Math.round(this.maxGap(s) * 100);
-    } else { this.ed.setSection(null, []); UI.$('c2bSecTitle').textContent = 'Querschnitt'; }
+    } else { this.edLoad(null); UI.$('c2bSecTitle').textContent = 'Querschnitt'; }
     this.onActiveProfile(true);
     this.renderSecList(); this.refreshSections3d(); this.plan.render();
     this.updateButtons();
@@ -379,7 +536,8 @@ const APP = {
       this.ed.pi = 0;
       UI.log(`${s.name}: Vorschlag mit ${s.profiles.length > 1 ? s.profiles.length + ' Teilprofilen, ' : ''}${s.profiles.map(p => p.vertices.length + ' Ecken' + (p.closed ? '' : ' (offen)')).join(' + ')}.`);
     } catch (e) { UI.log(s.name + ': ' + e.message, 'warn'); if (!quiet) UI.alert('Vorschlag nicht möglich', e.message); }
-    this.ed.setSection(s, pts, true); this.ed.fit();
+    this.autoPlanes([s]);
+    this.edLoad(s, true); this.ed.fit();
     this.onActiveProfile();
     this.onProfileChanged(s, true);
   },
@@ -394,6 +552,7 @@ const APP = {
     this.pushUndo();
     s.profiles = C2B.sec.fitSection(prev, this.secPts(s), UI.mm('c2bFitSearch', 0.15));
     this.ed.pi = 0;
+    this.autoPlanes([s]);
     UI.log(`${s.name}: Profil von «${prev.name}» übernommen und angepasst.`);
     this.ed.update(); this.onActiveProfile();
     this.onProfileChanged(s, true);
@@ -415,7 +574,7 @@ const APP = {
     this.pushUndo();
     for (let i = 0; i < empty.length; i++) {
       UI.progress(i / empty.length, `Vorschlag ${i + 1} / ${empty.length}`); await UI.tick();
-      try { empty[i].profiles = C2B.sec.autoProfiles(this.secPts(empty[i]), this.tol(), { maxGap: this.maxGap(empty[i]) }); this.devOf(empty[i]); }
+      try { empty[i].profiles = C2B.sec.autoProfiles(this.secPts(empty[i]), this.tol(), { maxGap: this.maxGap(empty[i]) }); this.autoPlanes([empty[i]]); this.devOf(empty[i]); }
       catch (e) { UI.log(empty[i].name + ': ' + e.message, 'warn'); }
     }
     UI.progress(null);
@@ -446,6 +605,7 @@ const APP = {
       }
     }
     UI.progress(null);
+    this.autoPlanes(S.filter(x => x !== src));
     S.forEach(s => this.devOf(s));
     UI.log(`Profil von «${src.name}» auf ${S.length - 1} Querschnitte übertragen.`);
     this.modelDirty(); this.updateAll();
@@ -738,7 +898,8 @@ const APP = {
   saveProject() {
     const data = { format: 'Cloud2BIM-Projekt', version: CONFIG.VERSION, saved: new Date().toISOString(),
       project: { name: this.project.name, source: this.project.source, offset: this.project.offset, axis: this.project.axis,
-        sections: this.project.sections.map(s => { const c = Object.assign({}, s); delete c._dev; return c; }), columns: this.project.columns },
+        sections: this.project.sections.map(s => { const c = Object.assign({}, s); delete c._dev; return c; }), columns: this.project.columns,
+        crops: this.project.crops, planes: this.project.planes },
       settings: (() => { const o = {}; UI.SETTING_IDS.forEach(id => { const el = UI.$(id); o[id] = el.type === 'checkbox' ? el.checked : el.value; }); return o; })() };
     UI.download(this.baseName() + '.c2b.json', JSON.stringify(data, null, 1), 'application/json');
   },
@@ -756,10 +917,14 @@ const APP = {
         (p.sections || []).forEach(s => { s.origin = [s.origin[0] + dx, s.origin[1] + dy]; });
         (p.columns || []).forEach(c => { c.x += dx; c.y += dy; });
         p.axis = (p.axis || []).map(q => [q[0] + dx, q[1] + dy]);
+        (p.crops || []).forEach(r => { r.poly = r.poly.map(q => [q[0] + dx, q[1] + dy]); });
+        (p.planes || []).forEach(pl => { pl.p0 = [pl.p0[0] + dx, pl.p0[1] + dy, pl.p0[2]]; pl.c = pl.n[0] * pl.p0[0] + pl.n[1] * pl.p0[1] + pl.n[2] * pl.p0[2]; if (pl.poly) pl.poly = pl.poly.map(q => [q[0] + dx, q[1] + dy]); });
         p.offset = this.project.offset;
       }
       Object.assign(this.project, { name: p.name || 'Cloud2BIM', offset: p.offset || this.project.offset, axis: p.axis || [],
-        sections: p.sections || [], columns: p.columns || [] });
+        sections: p.sections || [], columns: p.columns || [], crops: p.crops || [], planes: p.planes || [] });
+      this.renderCrops(); this.renderPlanes();
+      if (this.thinned) this.applyCrops(true);
       if (!this.project.source) this.project.source = p.source;
       this.project.sections.forEach(s => C2B.sec.profilesOf(s));
       if (d.settings) { UI.SETTING_IDS.forEach(id => { const el = UI.$(id); if (el && id in d.settings) { if (el.type === 'checkbox') el.checked = !!d.settings[id]; else el.value = d.settings[id]; } }); }
@@ -792,7 +957,11 @@ const APP = {
     const prof = s && this.hasProfile(s);
     const anyComp = this.project.sections.some(x => C2B.sec.allComponents(x).length);
     const set = (id, en) => { UI.$(id).disabled = !en; };
-    set('c2bThin', has); set('c2bThinReset', has && this.cloud !== this.raw);
+    set('c2bThin', has); set('c2bThinReset', has && this.thinned !== this.raw);
+    set('c2bCropKeep', has); set('c2bCropRemove', has); set('c2bPlDraw', has);
+    const nPl = (this.project.planes || []).length;
+    set('c2bPlApplyAll', nPl > 0 && nS > 0); set('c2bPlApply', nPl > 0 && prof);
+    set('c2bMaskAll', !!s && (s.masks || []).length > 0 && nS > 1); set('c2bMaskClear', !!s && (s.masks || []).length > 0);
     set('c2bAxisDraw', has); set('c2bCutDraw', has); set('c2bGen', has || nS >= 0);
     set('c2bAutoAll', has && nS); set('c2bPropagate', has && prof && nS > 1);
     set('c2bSecDel', !!s); set('c2bSecDelAll', nS > 0);
@@ -814,13 +983,15 @@ const APP = {
     const nComp = P.sections.filter(s => C2B.sec.allComponents(s).length).length;
     UI.$('c2bInfo1').textContent = this.raw ? UI.fmtInt(this.raw.n) + ' Pkt' : '';
     UI.$('c2bInfo2').textContent = c && c !== this.raw ? UI.fmtInt(c.n) + ' Pkt' : '';
-    UI.$('c2bInfo3').textContent = P.sections.length ? `${nProf}/${P.sections.length}` : '';
-    UI.$('c2bInfo4').textContent = P.sections.length ? `${nComp}/${P.sections.length}` : '';
-    UI.$('c2bInfo5').textContent = P.columns.length ? String(P.columns.length) : '';
-    const done = [!!this.raw, c && c !== this.raw, nProf > 0 && nProf === P.sections.length, nComp > 0, P.columns.length > 0, false];
+    UI.$('c2bInfo3').textContent = (P.planes || []).length ? String(P.planes.length) : '';
+    UI.$('c2bInfo4').textContent = P.sections.length ? `${nProf}/${P.sections.length}` : '';
+    UI.$('c2bInfo5').textContent = P.sections.length ? `${nComp}/${P.sections.length}` : '';
+    UI.$('c2bInfo6').textContent = P.columns.length ? String(P.columns.length) : '';
+    const done = [!!this.raw, c && c !== this.raw, (P.planes || []).length > 0, nProf > 0 && nProf === P.sections.length, nComp > 0, P.columns.length > 0, false];
     let active = done.findIndex(d => !d);
-    if (active === 1 && this.raw) active = 2;
-    for (let i = 1; i <= 6; i++) {
+    if (active === 1 && this.raw) active = 3;
+    if (active === 2) active = 3;
+    for (let i = 1; i <= 7; i++) {
       const el = UI.$('c2bStep' + i);
       el.classList.toggle('c2b-done', !!done[i - 1]);
       el.classList.toggle('c2b-active', active === i - 1);
@@ -830,7 +1001,7 @@ const APP = {
   },
 
   setSecTool(t) {
-    ['Edit', 'Draw', 'Edges'].forEach(k => UI.$('c2bTool' + k).setAttribute('aria-pressed', t === k.toLowerCase()));
+    ['Edit', 'Draw', 'Edges', 'Mask'].forEach(k => UI.$('c2bTool' + k).setAttribute('aria-pressed', t === k.toLowerCase()));
     this.ed.setTool(t);
   },
 
@@ -849,6 +1020,25 @@ const APP = {
     $('c2bAbort').addEventListener('click', () => { if (this.abort) this.abort.abort(); });
 
     $('c2bThin').addEventListener('click', () => this.thin());
+    $('c2bCropKeep').addEventListener('click', () => this.startCrop('keep'));
+    $('c2bCropRemove').addEventListener('click', () => this.startCrop('remove'));
+    $('c2bCropList').addEventListener('click', e => {
+      const d = e.target.closest('[data-del]'); if (!d) return;
+      this.pushUndo(); this.project.crops = this.project.crops.filter(r => r.id !== d.dataset.del);
+      this.renderCrops(); this.applyCrops(); this.plan.render();
+    });
+    $('c2bPlDraw').addEventListener('click', () => this.startPlane());
+    $('c2bPlApplyAll').addEventListener('click', () => this.applyPlanesAll());
+    $('c2bPlList').addEventListener('click', e => {
+      const d = e.target.closest('[data-del]'); if (!d) return;
+      this.pushUndo(); this.project.planes = this.project.planes.filter(pl => pl.id !== d.dataset.del);
+      UI.log('Ebene gelöscht (bereits angepasste Profile bleiben, «Rückgängig» stellt sie wieder her).');
+      this.renderPlanes(); this.plan.render(); this.reloadCurrentSectionPoints(); this.updateAll();
+    });
+    $('c2bPlList').addEventListener('change', e => {
+      const id = e.target.dataset.pl, pl = (this.project.planes || []).find(x => x.id === id);
+      if (pl && e.target.value.trim()) { pl.name = e.target.value.trim(); this.plan.render(); this.reloadCurrentSectionPoints(); }
+    });
     $('c2bThinReset').addEventListener('click', () => this.thinReset());
 
     $('c2bAxisDraw').addEventListener('click', () => {
@@ -930,7 +1120,7 @@ const APP = {
     $('c2bTab3d').addEventListener('click', () => this.setMode('3d'));
     $('c2bTabPlan').addEventListener('click', () => this.setMode('plan'));
     $('c2bFit').addEventListener('click', () => { if (this.mode === '3d') this.v3d && this.v3d.fit(); else this.plan.fit(); });
-    [['c2bShowCloud', 'cloud'], ['c2bShowSecs', 'sections'], ['c2bShowAreas', 'areas'], ['c2bShowModel', 'model'], ['c2bShowInterp', 'interp']].forEach(([id, g]) => $(id).addEventListener('click', () => {
+    [['c2bShowCloud', 'cloud'], ['c2bShowSecs', 'sections'], ['c2bShowAreas', 'areas'], ['c2bShowModel', 'model'], ['c2bShowInterp', 'interp'], ['c2bShowPlanes', 'planes']].forEach(([id, g]) => $(id).addEventListener('click', () => {
       const on = $(id).getAttribute('aria-pressed') !== 'true';
       $(id).setAttribute('aria-pressed', on);
       if (!this.v3d) return;
@@ -946,6 +1136,10 @@ const APP = {
     $('c2bToolEdit').addEventListener('click', () => this.setSecTool('edit'));
     $('c2bToolDraw').addEventListener('click', () => this.setSecTool('draw'));
     $('c2bToolEdges').addEventListener('click', () => this.setSecTool('edges'));
+    $('c2bToolMask').addEventListener('click', () => this.setSecTool('mask'));
+    $('c2bMaskAll').addEventListener('click', () => this.masksToAll());
+    $('c2bMaskClear').addEventListener('click', () => this.masksClear());
+    $('c2bPlApply').addEventListener('click', () => this.applyPlanesCurrent());
     $('c2bAuto').addEventListener('click', () => this.autoCurrent(false));
     $('c2bFromPrev').addEventListener('click', () => this.fromPrev());
     $('c2bRefit').addEventListener('click', () => this.refit());

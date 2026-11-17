@@ -17,7 +17,7 @@ UI.View3D = class {
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x666666, 0.75));
     const dl = new THREE.DirectionalLight(0xffffff, 0.6); dl.position.set(0.5, -0.8, 1.2); this.scene.add(dl);
     this.groups = {};
-    ['cloud', 'sections', 'areas', 'model', 'interp', 'wire'].forEach(k => { this.groups[k] = new THREE.Group(); this.scene.add(this.groups[k]); });
+    ['cloud', 'sections', 'areas', 'model', 'interp', 'wire', 'planes'].forEach(k => { this.groups[k] = new THREE.Group(); this.scene.add(this.groups[k]); });
     this.ptSize = 2;
     this._resize();
     new ResizeObserver(() => this._resize()).observe(host);
@@ -128,6 +128,18 @@ UI.View3D = class {
           this.groups.areas.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(outline), new THREE.LineBasicMaterial({ color: cur ? 0xD70036 : 0x1C1C1E })));
         });
       }
+    });
+    this.render();
+  }
+
+  /** Ebenen als halbtransparente Flächen mit Umriss. */
+  setPlanes(planes) {
+    this._clear(this.groups.planes);
+    (planes || []).forEach(pl => {
+      const C = C2B.planes.planeCorners(pl).map(p => new THREE.Vector3(...p));
+      const g = new THREE.BufferGeometry().setFromPoints([C[0], C[1], C[2], C[0], C[2], C[3]]);
+      this.groups.planes.add(new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0x1f6fb2, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false })));
+      this.groups.planes.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(C.concat([C[0]])), new THREE.LineBasicMaterial({ color: 0x1f6fb2 })));
     });
     this.render();
   }
