@@ -187,6 +187,69 @@ await step('Doppelröhre: zwei Teilprofile je Querschnitt', async () => {
   const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#c2bExpIfc')]);
   await dl.saveAs(path.join(out, 'doppelroehre.ifc'));
 });
+await step('Gewölbe: Mehrfachauswahl, Bogen, Schnitttiefe', async () => {
+  await page.setInputFiles('#c2bFile', path.join(root, 'beispiel/Demo_Gewoelbe.laz'));
+  await page.click('.bs-dialog .bs-btn--red');   // «Neu beginnen»
+  await page.waitForFunction(() => window.BSTool.APP.project.source === 'Demo_Gewoelbe.laz' && window.BSTool.APP.raw, null, { timeout: 120000 });
+  await page.click('#c2bThin'); await page.waitForTimeout(400);
+  await page.evaluate(() => { document.getElementById('c2bStep4').open = true; });
+  await page.fill('#c2bAxS_E', '2601000'); await page.fill('#c2bAxS_N', '1200000.5');
+  await page.fill('#c2bAxE_E', '2601000'); await page.fill('#c2bAxE_N', '1200014.5');
+  await page.click('#c2bModeCount'); await page.fill('#c2bCount', '4'); await page.fill('#c2bDepth', '50');
+  await page.click('#c2bGen');
+  await page.waitForFunction(() => window.BSTool.APP.project.sections.length === 4 && window.BSTool.APP.project.sections.every(s => s.profiles.length), null, { timeout: 60000 });
+  const before = await page.evaluate(() => window.BSTool.APP.curProf().vertices.length);
+  // Schnitttiefe dieses Querschnitts ändern
+  const n50 = await page.evaluate(() => window.BSTool.APP.ed.pts.length);
+  await page.fill('#c2bSecDepth', '100'); await page.press('#c2bSecDepth', 'Enter');
+  const n100 = await page.evaluate(() => window.BSTool.APP.ed.pts.length);
+  console.log('   Punkte bei Schnitttiefe 50 / 100 mm:', n50, '/', n100);
+  if (!(n100 > n50 * 1.5)) throw new Error('Schnitttiefe wirkt nicht');
+  // Auswahlrechteck (Shift+Ziehen) über dem Gewölbe inkl. Kämpferpunkten
+  const box = await page.evaluate(() => { const A = window.BSTool.APP, r = document.getElementById('c2bSec').getBoundingClientRect();
+    const a = A.ed.toS(-3.3, 605.3), b = A.ed.toS(3.3, 601.9), cl = (v, lo, hi) => Math.max(lo + 2, Math.min(hi - 2, v));
+    return [r.left + cl(a[0], 0, r.width), r.top + cl(a[1], 0, r.height), r.left + cl(b[0], 0, r.width), r.top + cl(b[1], 0, r.height)]; });
+  await page.keyboard.down('Shift');
+  await page.mouse.move(box[0], box[1]); await page.mouse.down(); await page.mouse.move(box[2], box[3], { steps: 5 }); await page.mouse.up();
+  await page.keyboard.up('Shift');
+  const nsel = await page.evaluate(() => window.BSTool.APP.ed.sel.size);
+  await page.click('#c2bArc');
+  const res = await page.evaluate(() => { const A = window.BSTool.APP, P = A.curProf(), C = window.BSTool.C2B;
+    const i = P.mids.findIndex(Boolean), n = P.vertices.length; const pr = C.arc.param(P.vertices[i], P.mids[i], P.vertices[(i + 1) % n]);
+    return { n, r: pr.r, c: pr.c, dev: A.curSec()._dev }; });
+  console.log('   Ecken vorher', before, '· gewählt', nsel, '· nachher', res.n, '· Radius', res.r.toFixed(4), '· Zentrum', res.c.map(x => x.toFixed(3)).join('/'), '· max. Abw.', (res.dev * 1000).toFixed(1), 'mm');
+  if (res.n > 5 || Math.abs(res.r - 3) > 0.01) throw new Error('Bogen falsch');
+  await page.screenshot({ path: path.join(out, 'e2e_9_gewoelbe.png') });
+  // Mehrfachauswahl löschen + Undo
+  const pts2 = await page.evaluate(() => { const A = window.BSTool.APP, r = document.getElementById('c2bSec').getBoundingClientRect(), V = A.curProf().vertices;
+    return [0, 1].map(i => { const [x, y] = A.ed.toS(V[i][0], V[i][1]); return [r.left + x, r.top + y]; }); });
+  const empty = await page.evaluate(() => { const A = window.BSTool.APP, r = document.getElementById('c2bSec').getBoundingClientRect(); const [x, y] = A.ed.toS(0, 601); return [r.left + x, r.top + y]; });
+  await page.mouse.click(empty[0], empty[1]);   // Klick ins Leere: Auswahl aufheben
+  await page.keyboard.down('Control');
+  for (const [x, y] of pts2) await page.mouse.click(x, y);
+  await page.keyboard.up('Control');
+  await page.keyboard.press('Delete');
+  const nDel = await page.evaluate(() => window.BSTool.APP.curProf().vertices.length);
+  await page.keyboard.press('Control+z');
+  const nUndo = await page.evaluate(() => window.BSTool.APP.curProf().vertices.length);
+  console.log('   2 Ecken gewählt und gelöscht:', res.n, '->', nDel, '· Rückgängig ->', nUndo);
+  if (nDel !== res.n - 2 || nUndo !== res.n) throw new Error('Mehrfach-Löschen');
+  // Profil mit Bogen auf alle übertragen
+  await page.click('#c2bPropagate');
+  await page.click('.bs-dialog .bs-dialog-actions button:last-child');
+  await page.waitForTimeout(800);
+  const all = await page.evaluate(() => window.BSTool.APP.sortedSecs().map(s => { const P = s.profiles[0], C = window.BSTool.C2B; const i = (P.mids || []).findIndex(Boolean);
+    const pr = i >= 0 ? C.arc.param(P.vertices[i], P.mids[i], P.vertices[(i + 1) % P.vertices.length]) : null; return [P.vertices.length, pr && +pr.r.toFixed(4), s._dev && +(s._dev * 1000).toFixed(1)]; }));
+  console.log('   alle Querschnitte [Ecken, Radius, max. Abw. mm]:', JSON.stringify(all));
+  if (!all.every(a => a[0] === res.n && Math.abs(a[1] - 3) < 0.01)) throw new Error('Übertragen mit Bogen');
+  await page.click('#c2bCompAuto'); await page.click('#c2bCompCopy');
+  await page.waitForFunction(() => window.BSTool.APP.solids && window.BSTool.APP.solids.length >= 3, null, { timeout: 10000 });
+  console.log('   Bauteile:', JSON.stringify(await page.evaluate(() => window.BSTool.APP.solids.map(s => s.name + ' ' + s.volume.toFixed(2)))));
+  await page.click('#c2bTab3d'); await page.click('#c2bShowCloud'); await page.click('#c2bFit'); await page.waitForTimeout(300);
+  await page.screenshot({ path: path.join(out, 'e2e_10_gewoelbe_3d.png'), clip: { x: 300, y: 68, width: 650, height: 850 } });
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#c2bExpIfc')]);
+  await dl.saveAs(path.join(out, 'gewoelbe.ifc'));
+});
 console.log('--- Log ---\n' + (await log()));
 await browser.close();
 if (errors.length) { console.log('FEHLER:\n' + errors.join('\n')); process.exit(1); }

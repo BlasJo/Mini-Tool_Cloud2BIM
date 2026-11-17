@@ -112,6 +112,11 @@ UI.PlanView = class {
       const p1 = this.toScreen(f.o[0] - f.u[0] * half, f.o[1] - f.u[1] * half);
       const p2 = this.toScreen(f.o[0] + f.u[0] * half, f.o[1] + f.u[1] * half);
       const cur = s.id === app.curSecId;
+      if (cur) {   // Schnitttiefe als Streifen
+        const hd = 0.5 * (s.depth || 0.05);
+        const q = [[-half, -hd], [half, -hd], [half, hd], [-half, hd]].map(([u, t]) => this.toScreen(f.o[0] + f.u[0] * u + f.d[0] * t, f.o[1] + f.u[1] * u + f.d[1] * t));
+        ctx.fillStyle = 'rgba(215,0,54,0.18)'; ctx.beginPath(); q.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath(); ctx.fill();
+      }
       ctx.strokeStyle = cur ? '#D70036' : (this.app.hasProfile(s) ? '#2D8653' : '#8E8E93');
       ctx.lineWidth = cur ? 3 : 1.5;
       ctx.beginPath(); ctx.moveTo(p1[0], p1[1]); ctx.lineTo(p2[0], p2[1]); ctx.stroke();

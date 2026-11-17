@@ -52,7 +52,7 @@ C2B.model = (() => {
     const out = {};
     sec.profilesOf(s).forEach((P, pi) => {
       if (P.vertices.length < 2) return;
-      const r = profileRings(P, tmap);
+      const r = profileRings(C2B.arc.expand(P), tmap);
       Object.keys(r).forEach(k => { r[k].profileIndex = pi; out[k] = r[k]; });
     });
     return out;
@@ -305,8 +305,9 @@ C2B.model = (() => {
     let prevList = [];
     S.forEach(s => {
       const cur = [];
-      sec.profilesOf(s).forEach(P => {
-        if (P.vertices.length < 2) return;
+      sec.profilesOf(s).forEach(P0 => {
+        if (P0.vertices.length < 2) return;
+        const P = C2B.arc.expand(P0);
         const closed = !!P.closed && P.vertices.length >= 3;
         let V = P.vertices.map(p => p.slice());
         const c = centroid(s, P);

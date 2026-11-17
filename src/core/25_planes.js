@@ -204,6 +204,7 @@ C2B.planes = (() => {
     const cosMax = Math.cos(maxAngleDeg * Math.PI / 180);
     const applied = [];
     const edgeLines = E.map(([a, b], e) => {
+      if (profile.mids && profile.mids[e]) return { arc: true, fixed: false };   // Bögen bleiben
       const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1, d = [(b[0] - a[0]) / L, (b[1] - a[1]) / L];
       const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
       let best = null, bd = maxDist;
@@ -225,7 +226,9 @@ C2B.planes = (() => {
     const out = V.map((v, k) => {
       const pe = closed ? (k - 1 + ne) % ne : (k > 0 ? k - 1 : null);
       const nx = k < ne ? k : null;
-      const L1 = pe !== null ? edgeLines[pe] : null, L2 = nx !== null ? edgeLines[nx] : null;
+      let L1 = pe !== null ? edgeLines[pe] : null, L2 = nx !== null ? edgeLines[nx] : null;
+      if (L1 && L1.arc) L1 = null;
+      if (L2 && L2.arc) L2 = null;
       if (!(L1 && L1.fixed) && !(L2 && L2.fixed)) return v.slice();
       if (L1 && L2) {
         const x = g2.intersectLines(L1, L2, minSin);

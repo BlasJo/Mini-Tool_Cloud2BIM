@@ -80,6 +80,8 @@ C2B.g2 = (() => {
    */
   function deviationMulti(P, profiles, tol, band) {
     band = band || Math.max(5 * tol, 0.10);
+    // Bögen auflösen (segOk/segMax beziehen sich dann auf die aufgelösten Kanten)
+    profiles = profiles.map(p => (C2B.arc ? C2B.arc.expand(p) : p));
     const valid = profiles.map(p => p.vertices.length >= 2);
     const per = profiles.map((p, k) => valid[k] ? distancesToPolyline(P, p.vertices, p.closed && p.vertices.length >= 3) : null);
     const segMax = profiles.map(p => new Array(edgeCount(p.vertices.length, p.closed)).fill(null));

@@ -186,7 +186,7 @@ const APP = {
 
   reloadCurrentSectionPoints() {
     const s = this.curSec();
-    if (s) this.edLoad(s, true);
+    if (s) { this.edLoad(s, true); this.onActiveProfile(true); this.onSelection(this.ed.sel.size); }
   },
 
   // ───────────────────────────────────────────── Ausschneiden
@@ -500,8 +500,10 @@ const APP = {
       this.edLoad(s, keepView && this.ed.sec && this.ed.sec.id === s.id);
       UI.$('c2bSecTitle').textContent = s.name + ' · Station ' + s.station.toFixed(2);
       UI.$('c2bMaxGap').value = Math.round(this.maxGap(s) * 100);
+      UI.$('c2bSecDepth').value = Math.round((s.depth || 0.05) * 1000);
     } else { this.edLoad(null); UI.$('c2bSecTitle').textContent = 'Querschnitt'; }
     this.onActiveProfile(true);
+    this.onSelection(this.ed.sel.size);
     this.renderSecList(); this.refreshSections3d(); this.plan.render();
     this.updateButtons();
   },
@@ -562,8 +564,9 @@ const APP = {
     const s = this.curSec(), P = this.curProf();
     if (!s || !P || P.vertices.length < 2) return;
     this.pushUndo();
-    const f = C2B.sec.fitTemplate(P.vertices, P.closed, this.secPts(s), UI.mm('c2bFitSearch', 0.15), false);
+    const f = C2B.sec.fitProfile(P, this.secPts(s), UI.mm('c2bFitSearch', 0.15), false);
     P.vertices = f.vertices;
+    if (f.mids) P.mids = f.mids;
     this.ed.update();
     this.onProfileChanged(s, false);
   },
@@ -628,6 +631,7 @@ const APP = {
   },
 
   onProfileChanged(s) {
+    this.onSelection(this.ed.sel.size);
     const cp = this.curProf();
     UI.$('c2bClosed').checked = !!(cp && cp.closed);
     const sel = UI.$('c2bProfSel');
@@ -762,6 +766,15 @@ const APP = {
     this.ed.edgeSel = null;
     this.onEdgeSelection(null);
     this.onProfileChanged(s); this.ed.render();
+  },
+
+  /** Anzahl gewählter Ecken (Mehrfachauswahl im Editor). */
+  onSelection(n) {
+    const P = this.curProf();
+    UI.$('c2bDelSel').disabled = !n;
+    UI.$('c2bArc').disabled = !(n >= 2 && this.ed.selChain());
+    UI.$('c2bLine').disabled = !(P && P.mids && P.mids.some(Boolean));
+    UI.$('c2bDelSel').textContent = n > 1 ? `${n} Ecken löschen` : 'Ecken löschen';
   },
 
   onEdgeSelection(sel) {
@@ -1147,6 +1160,7 @@ const APP = {
     $('c2bClosed').addEventListener('change', e => {
       const s = this.curSec(), P = this.curProf(); if (!s || !P) return;
       this.pushUndo(); P.closed = e.target.checked && P.vertices.length >= 3;
+      C2B.arc.sync(P);
       const n = P.vertices.length;
       P.components = P.components.filter(c => C2B.sec.componentEdges(c, n, P.closed).length > 0 && (P.closed || c.end > c.start));
       this.ed.update(); this.onActiveProfile(); this.onProfileChanged(s);
@@ -1159,6 +1173,25 @@ const APP = {
       this.ed.update(); this.onActiveProfile(); this.onProfileChanged(s);
     });
     $('c2bProfSel').addEventListener('change', e => this.ed.setActive(+e.target.value));
+    $('c2bArc').addEventListener('click', () => { const msg = this.ed.makeArc(); if (msg) UI.alert('Bogen', msg); else UI.log('Bogen erzeugt und in die Punkte eingepasst.'); });
+    $('c2bLine').addEventListener('click', () => { if (!this.ed.makeStraight()) UI.log('Keine Bögen zwischen den gewählten Ecken.', 'warn'); });
+    $('c2bDelSel').addEventListener('click', () => this.ed.deleteVertices([...this.ed.sel]));
+    $('c2bSecDepth').addEventListener('change', e => {
+      const s = this.curSec(), v = parseFloat(e.target.value);
+      if (!s) return;
+      if (!(v > 0)) { e.target.value = Math.round((s.depth || 0.05) * 1000); return; }
+      this.pushUndo();
+      s.depth = v / 1000;
+      this.reloadCurrentSectionPoints(); this.devOf(s); this.renderSecList(); this.refreshSections3d();
+      UI.log(`${s.name}: Schnitttiefe ${v} mm (${UI.fmtInt(this.secPts(s).length)} Punkte).`);
+    });
+    $('c2bSecDepthAll').addEventListener('click', () => {
+      const s = this.curSec(); if (!s) return;
+      this.pushUndo();
+      this.project.sections.forEach(x => { x.depth = s.depth; this.devOf(x); });
+      UI.log(`Schnitttiefe ${Math.round(s.depth * 1000)} mm für alle ${this.project.sections.length} Querschnitte übernommen.`);
+      this.renderSecList(); this.refreshSections3d();
+    });
     $('c2bMaxGap').addEventListener('change', e => {
       const s = this.curSec(); if (!s) return;
       const v = parseFloat(e.target.value);

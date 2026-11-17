@@ -1,17 +1,21 @@
 /* ═══ Cloud2BIM UI: Querschnitt-Editor (u/v-Ansicht, Teilprofile zeichnen/bearbeiten, Bauteile) ═══
    Ein Querschnitt kann mehrere Teilprofile haben (z. B. zwei Tunnelröhren). Bearbeitet wird
-   das aktive Teilprofil (this.pi); ein Klick auf ein anderes Profil macht dieses aktiv. */
+   das aktive Teilprofil (this.pi); ein Klick auf ein anderes Profil macht dieses aktiv.
+   Mehrfachauswahl: Strg+Klick, Shift+Ziehen (Rechteck), Strg+A. Bögen: Kante mit Bogenpunkt
+   (P.mids[i]), runder Griff in der Bogenmitte. */
 UI.SectionEditor = class {
   constructor(canvas, app) {
     this.cv = canvas; this.app = app; this.ctx = canvas.getContext('2d');
     this.sec = null; this.pts = []; this.pi = 0;
     this.scale = 50; this.cu = 0; this.cv0 = 0;
     this.tool = 'edit';
-    this.selV = -1; this.hoverV = -1; this.hoverE = -1; this.hoverP = -1;
+    this.sel = new Set();          // gewählte Ecken des aktiven Teilprofils
+    this.hoverV = -1; this.hoverE = -1; this.hoverP = -1; this.hoverM = -1;
     this.edgeSel = null;           // { a: Kante, b: Kante } im aktiven Teilprofil
     this.report = null;
     this.mouse = null;
     this.drawing = null;           // Punktliste beim Zeichnen
+    this.band = null;              // Auswahlrechteck [x0,y0,x1,y1] (Bildschirm)
     this._bind();
   }
 
@@ -20,16 +24,25 @@ UI.SectionEditor = class {
 
   setSection(sec, pts, keepView) {
     const same = sec && this.sec && sec.id === this.sec.id;
-    this.sec = sec; this.pts = pts || []; this.selV = -1; this.edgeSel = null; this.drawing = null;
-    if (!same) this.pi = 0;
+    this.sec = sec; this.pts = pts || []; this.edgeSel = null; this.drawing = null;
+    if (!same) { this.pi = 0; this.sel = new Set(); }
     this.pi = Math.max(0, Math.min(this.pi, this.profiles().length - 1));
+    this._cleanSel();
     if (!keepView) this.fit();
     this.update();
   }
 
+  _cleanSel() {
+    const P = this.prof(), n = P ? P.vertices.length : 0;
+    this.sel = new Set([...this.sel].filter(i => i < n));
+    this.app.onSelection && this.app.onSelection(this.sel.size);
+  }
+  setSel(arr) { this.sel = new Set(arr); this._cleanSel(); this.render(); }
+
   setActive(pi) {
     if (pi === this.pi || pi < 0 || pi >= this.profiles().length) return;
-    this.pi = pi; this.selV = -1; this.edgeSel = null;
+    this.pi = pi; this.sel = new Set(); this.edgeSel = null;
+    this._cleanSel();
     this.app.onActiveProfile();
     this.render();
   }
@@ -120,31 +133,43 @@ UI.SectionEditor = class {
       ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); ctx.setLineDash([]);
       ctx.fillStyle = '#1f6fb2'; ctx.font = '10px system-ui, sans-serif'; ctx.fillText(l.plane.name, (x1 + x2) / 2 + 4, (y1 + y2) / 2 + 12);
     });
-    // Teilprofile
+    // Teilprofile (Bögen aufgelöst; Farbe je aufgelöster Kante aus der Abweichung)
     const profs = this.profiles();
     profs.forEach((P, k) => {
       const V = P.vertices, active = k === this.pi;
       if (V.length < 2) return;
-      const E = C2B.g2.edges(V, P.closed);
+      const ex = C2B.arc.expand(P);
+      const E = C2B.g2.edges(ex.vertices, ex.closed);
       const ok = this.report && this.report.segOk[k] ? this.report.segOk[k] : [];
       const selEdges = active ? this._selEdgeSet() : new Set();
       ctx.globalAlpha = active ? 1 : (k === this.hoverP ? 0.9 : 0.55);
       E.forEach(([a, b], e) => {
+        const oe = ex.edgeMap[e];
         const [x1, y1] = this.toS(a[0], a[1]), [x2, y2] = this.toS(b[0], b[1]);
-        if (selEdges.has(e)) { ctx.save(); ctx.strokeStyle = '#1f6fb2'; ctx.lineWidth = 6; ctx.globalAlpha = 0.45; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); ctx.restore(); }
+        const chainSel = active && this.sel.has(oe) && this.sel.has((oe + 1) % V.length);
+        if (selEdges.has(oe) || chainSel) { ctx.save(); ctx.strokeStyle = chainSel ? '#D70036' : '#1f6fb2'; ctx.lineWidth = 6; ctx.globalAlpha = 0.3; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); ctx.restore(); }
         ctx.strokeStyle = ok[e] === false ? '#D70036' : '#2D8653';
-        ctx.lineWidth = active ? (e === this.hoverE ? 3.5 : 2.2) : 1.6;
+        ctx.lineWidth = active ? (oe === this.hoverE ? 3.5 : 2.2) : 1.6;
         if (!active) ctx.setLineDash([6, 3]);
         ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
         ctx.setLineDash([]);
-        if (active && this.scale > 25) {
-          const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
-          if (L * this.scale > 60) {
-            ctx.fillStyle = dark ? '#AEAEB2' : '#636366'; ctx.font = '10px system-ui, sans-serif'; ctx.textAlign = 'center';
-            ctx.fillText(L.toFixed(3), (x1 + x2) / 2, (y1 + y2) / 2 - 5); ctx.textAlign = 'left';
-          }
-        }
       });
+      // Masse: Länge der geraden Kanten, Radius der Bögen
+      if (active && this.scale > 25) {
+        ctx.fillStyle = dark ? '#AEAEB2' : '#636366'; ctx.font = '10px system-ui, sans-serif'; ctx.textAlign = 'center';
+        C2B.g2.edges(V, P.closed).forEach(([a, b], e) => {
+          const m = P.mids && P.mids[e];
+          if (m) {
+            const pr = C2B.arc.param(a, m, b);
+            const [x, y] = this.toS(m[0], m[1]);
+            if (pr) ctx.fillText('R ' + pr.r.toFixed(3), x, y - 9);
+          } else {
+            const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+            if (L * this.scale > 60) { const [x1, y1] = this.toS(a[0], a[1]), [x2, y2] = this.toS(b[0], b[1]); ctx.fillText(L.toFixed(3), (x1 + x2) / 2, (y1 + y2) / 2 - 5); }
+          }
+        });
+        ctx.textAlign = 'left';
+      }
       if (profs.length > 1) {   // Nummer des Teilprofils
         let u = 0, v = 0; V.forEach(q => { u += q[0]; v += q[1]; });
         const [x, y] = this.toS(u / V.length, v / V.length);
@@ -152,15 +177,32 @@ UI.SectionEditor = class {
         ctx.fillText('Profil ' + (k + 1), x, y); ctx.textAlign = 'left';
       }
       ctx.globalAlpha = 1;
-      if (active) V.forEach((p, i) => {
-        const [x, y] = this.toS(p[0], p[1]);
-        const sel = i === this.selV, hov = i === this.hoverV;
-        ctx.fillStyle = sel ? '#D70036' : (dark ? '#2C2C2E' : '#fff');
-        ctx.strokeStyle = '#D70036'; ctx.lineWidth = 1.6;
-        const s = sel || hov ? 5 : 3.5;
-        ctx.beginPath(); ctx.rect(x - s, y - s, 2 * s, 2 * s); ctx.fill(); ctx.stroke();
-      });
+      if (active) {
+        // Bogengriffe (rund)
+        (P.mids || []).forEach((m, i) => {
+          if (!m) return;
+          const [x, y] = this.toS(m[0], m[1]);
+          ctx.fillStyle = i === this.hoverM ? '#1f6fb2' : (dark ? '#2C2C2E' : '#fff'); ctx.strokeStyle = '#1f6fb2'; ctx.lineWidth = 1.6;
+          ctx.beginPath(); ctx.arc(x, y, i === this.hoverM ? 5.5 : 4.5, 0, 7); ctx.fill(); ctx.stroke();
+        });
+        V.forEach((p, i) => {
+          const [x, y] = this.toS(p[0], p[1]);
+          const sel = this.sel.has(i), hov = i === this.hoverV;
+          ctx.fillStyle = sel ? '#D70036' : (dark ? '#2C2C2E' : '#fff');
+          ctx.strokeStyle = '#D70036'; ctx.lineWidth = 1.6;
+          const s = sel || hov ? 5 : 3.5;
+          ctx.beginPath(); ctx.rect(x - s, y - s, 2 * s, 2 * s); ctx.fill(); ctx.stroke();
+        });
+      }
     });
+    // Auswahlrechteck
+    if (this.band) {
+      const [x0, y0, x1, y1] = this.band;
+      ctx.fillStyle = 'rgba(215,0,54,0.07)'; ctx.strokeStyle = '#D70036'; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+      ctx.fillRect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0));
+      ctx.strokeRect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0));
+      ctx.setLineDash([]);
+    }
     // Zeichnen
     if (this.drawing && this.drawing.length) {
       ctx.strokeStyle = '#D70036'; ctx.lineWidth = 2; ctx.setLineDash([5, 3]);
@@ -226,14 +268,22 @@ UI.SectionEditor = class {
     V.forEach((p, i) => { const [x, y] = this.toS(p[0], p[1]); const d = Math.hypot(x - px, y - py); if (d < bd) { bd = d; best = i; } });
     return best;
   }
+  _hitMid(px, py, tolPx = 8) {
+    const P = this.prof();
+    let best = -1, bd = tolPx;
+    ((P && P.mids) || []).forEach((m, i) => { if (!m) return; const [x, y] = this.toS(m[0], m[1]); const d = Math.hypot(x - px, y - py); if (d < bd) { bd = d; best = i; } });
+    return best;
+  }
+  /** Kante unter der Maus (Bögen über die aufgelöste Polylinie) -> ursprüngliche Kante. */
   _hitEdge(px, py, tolPx = 7, pi = this.pi) {
     const P = this.profiles()[pi];
     if (!P || P.vertices.length < 2) return -1;
+    const ex = C2B.arc.expand(P);
     let best = -1, bd = tolPx;
-    C2B.g2.edges(P.vertices, P.closed).forEach(([a, b], e) => {
+    C2B.g2.edges(ex.vertices, ex.closed).forEach(([a, b], e) => {
       const [x1, y1] = this.toS(a[0], a[1]), [x2, y2] = this.toS(b[0], b[1]);
       const d = C2B.g2.distPointSeg(px, py, x1, y1, x2, y2);
-      if (d < bd) { bd = d; best = e; }
+      if (d < bd) { bd = d; best = ex.edgeMap[e]; }
     });
     return best;
   }
@@ -254,33 +304,120 @@ UI.SectionEditor = class {
     this.update();
   }
 
+  /** Ecke auf Kante e einfügen; liegt sie auf einem Bogen, wird der Bogen geteilt. */
   insertVertex(e, p) {
     const P = this.prof(); if (!P) return;
     this.app.pushUndo();
-    const ni = e + 1;
-    P.vertices.splice(ni, 0, p);
+    const n = P.vertices.length, ni = e + 1;
+    const m = P.mids && P.mids[e];
+    let q = p, m1 = null, m2 = null;
+    if (m) { const sp = C2B.arc.split(P.vertices[e], m, P.vertices[(e + 1) % n], p); if (sp) { q = sp.p; m1 = sp.m1; m2 = sp.m2; } }
+    P.vertices.splice(ni, 0, q);
+    if (P.mids) { P.mids[e] = m1; P.mids.splice(ni, 0, m2); }
     P.components.forEach(c => { if (c.start >= ni) c.start++; if (c.end >= ni) c.end++; });
-    this.selV = ni;
+    this.sel = new Set([ni]);
     this._changed(true);
   }
 
-  deleteVertex(i) {
+  /** Mehrere Ecken löschen (ohne Undo-Eintrag). Benachbarte Kanten werden zu einer Geraden. */
+  _removeVertices(list) {
     const P = this.prof(); if (!P) return;
-    const V = P.vertices;
-    if (i < 0 || i >= V.length) return;
-    this.app.pushUndo();
-    V.splice(i, 1);
-    const n = V.length;
-    if (P.closed && n < 3) P.closed = false;
-    P.components.forEach(c => {
-      if (c.start > i) c.start--; if (c.end > i) c.end--;
-      if (P.closed) { c.start = ((c.start % n) + n) % n; c.end = ((c.end % n) + n) % n; }
-      else { c.start = Math.min(c.start, n - 1); c.end = Math.min(c.end, n - 1); }
+    [...new Set(list)].sort((a, b) => b - a).forEach(i => {
+      const V = P.vertices;
+      if (i < 0 || i >= V.length) return;
+      if (P.mids) {
+        const n0 = V.length, prevE = P.closed ? (i - 1 + n0) % n0 : i - 1;
+        if (prevE >= 0) P.mids[prevE] = null;   // zusammengelegte Kante wird gerade
+        P.mids.splice(i, 1);
+      }
+      V.splice(i, 1);
+      const n = V.length;
+      P.components.forEach(c => {
+        if (c.start > i) c.start--; if (c.end > i) c.end--;
+        if (P.closed && n) { c.start = ((c.start % n) + n) % n; c.end = ((c.end % n) + n) % n; }
+        else { c.start = Math.min(c.start, Math.max(0, n - 1)); c.end = Math.min(c.end, Math.max(0, n - 1)); }
+      });
     });
-    P.components = P.components.filter(c => C2B.sec.componentEdges(c, n, P.closed).length > 0 && c.start !== c.end);
-    if (n < 2) { this.profiles().splice(this.pi, 1); this.pi = Math.max(0, this.pi - 1); }
-    this.selV = -1;
+    const n = P.vertices.length;
+    if (P.closed && n < 3) P.closed = false;
+    C2B.arc.sync(P);
+    P.components = P.components.filter(c => n >= 2 && C2B.sec.componentEdges(c, n, P.closed).length > 0 && c.start !== c.end);
+  }
+
+  deleteVertices(list) {
+    const P = this.prof(); if (!P || !list.length) return;
+    this.app.pushUndo();
+    this._removeVertices(list);
+    if (P.vertices.length < 2) { this.profiles().splice(this.pi, 1); this.pi = Math.max(0, this.pi - 1); this.app.onActiveProfile(); }
+    this.sel = new Set();
+    this._cleanSel();
     this._changed(true);
+  }
+
+  /** Gewählte Ecken als zusammenhängende Kette in Profilreihenfolge (oder null). */
+  selChain() {
+    const P = this.prof(); if (!P) return null;
+    const n = P.vertices.length, k = this.sel.size;
+    if (k < 2) return null;
+    if (!P.closed) {
+      const s = [...this.sel].sort((a, b) => a - b);
+      return s[s.length - 1] - s[0] === k - 1 ? s : null;
+    }
+    if (k === n) return null;
+    for (let j = 0; j < n; j++) {
+      if (!this.sel.has(j) || this.sel.has((j - 1 + n) % n)) continue;   // Kettenanfang
+      const ch = []; for (let t = 0; t < k; t++) ch.push((j + t) % n);
+      return ch.every(i => this.sel.has(i)) ? ch : null;
+    }
+    return null;
+  }
+
+  /**
+   * Bogen: zwei benachbarte Ecken -> Kante wird Bogen; Kette mit mehr Ecken -> innere Ecken
+   * entfallen, Bogen von der ersten zur letzten. Bogenpunkt wird in die Punkte eingepasst.
+   */
+  makeArc() {
+    const P = this.prof(), ch = this.selChain();
+    if (!P || !ch) return 'Für einen Bogen zwei benachbarte Ecken oder eine zusammenhängende Kette von Ecken wählen (Strg+Klick oder Shift+Ziehen).';
+    this.app.pushUndo();
+    const first = ch[0], last = ch[ch.length - 1];
+    const inner = ch.slice(1, -1);
+    const a0 = P.vertices[first], b0 = P.vertices[last];
+    // Startwert der Pfeilhöhe: mittlere innere Ecke bzw. bestehender Bogenpunkt
+    let s0 = 0;
+    if (inner.length) s0 = C2B.arc.sagittaOf(a0, P.vertices[inner[Math.floor(inner.length / 2)]], b0);
+    else if (P.mids && P.mids[first]) s0 = C2B.arc.sagittaOf(a0, P.mids[first], b0);
+    if (inner.length) this._removeVertices(inner);
+    const n = P.vertices.length;
+    const fi = first - inner.filter(i => i < first).length;
+    const a = P.vertices[fi], b = P.vertices[(fi + 1) % n];
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    let s = C2B.arc.fitSagitta(a, b, this.pts, s0, Math.max(L / 2, Math.abs(s0)));
+    if (Math.abs(s) < L * 0.01) s = s0 || L * 0.1;   // keine Krümmung erkennbar: kleiner Bogen zum Ziehen
+    if (!P.mids) P.mids = new Array(n).fill(null);
+    while (P.mids.length < n) P.mids.push(null);
+    P.mids.length = n;
+    P.mids[fi] = C2B.arc.midFromSagitta(a, b, s);
+    this.sel = new Set([fi, (fi + 1) % n]);
+    this._cleanSel();
+    this._changed(true);
+    const pr = C2B.arc.param(a, P.mids[fi], b);
+    return pr ? null : 'Bogen ist (fast) gerade.';
+  }
+
+  /** Bögen zwischen gewählten Ecken (oder alle, wenn nichts gewählt) wieder zu Geraden. */
+  makeStraight() {
+    const P = this.prof();
+    if (!P || !P.mids) return false;
+    const n = P.vertices.length;
+    let k = 0;
+    P.mids.forEach((m, i) => { if (m && (!this.sel.size || (this.sel.has(i) && this.sel.has((i + 1) % n)))) k++; });
+    if (!k) return false;
+    this.app.pushUndo();
+    P.mids = P.mids.map((m, i) => (m && (!this.sel.size || (this.sel.has(i) && this.sel.has((i + 1) % n))) ? null : m));
+    C2B.arc.sync(P);
+    this._changed(true);
+    return true;
   }
 
   _bind() {
@@ -291,7 +428,7 @@ UI.SectionEditor = class {
       e.preventDefault();
       if (!this.sec || this.tool !== 'edit') return;
       const [px, py] = pos(e), i = this._hitVertex(px, py);
-      if (i >= 0) this.deleteVertex(i);
+      if (i >= 0) this.deleteVertices(this.sel.has(i) ? [...this.sel] : [i]);
     });
     cv.addEventListener('wheel', e => {
       e.preventDefault();
@@ -306,8 +443,26 @@ UI.SectionEditor = class {
       cv.focus();
       cv.setPointerCapture(e.pointerId);
       const [px, py] = pos(e);
-      const vi = this.tool === 'edit' && e.button === 0 ? this._hitVertex(px, py) : -1;
-      if (vi >= 0) { this.selV = vi; this.app.pushUndo(); drag = { type: 'vertex', i: vi, moved: false }; this.render(); return; }
+      const w = this.toW(px, py);
+      const edit = this.tool === 'edit' && e.button === 0;
+      const mi = edit ? this._hitMid(px, py) : -1;
+      if (mi >= 0) { this.app.pushUndo(); drag = { type: 'mid', i: mi, moved: false }; return; }
+      const vi = edit ? this._hitVertex(px, py) : -1;
+      if (vi >= 0) {
+        if (e.ctrlKey || e.metaKey) {   // Auswahl umschalten
+          if (this.sel.has(vi)) this.sel.delete(vi); else this.sel.add(vi);
+          this._cleanSel(); this.render(); drag = { type: 'none' }; return;
+        }
+        if (!this.sel.has(vi)) this.sel = new Set([vi]);
+        this._cleanSel();
+        const P = this.prof();
+        this.app.pushUndo();
+        drag = { type: 'vertex', i: vi, start: w, moved: false,
+          orig: new Map([...this.sel].map(i => [i, P.vertices[i].slice()])),
+          origMid: new Map((P.mids || []).map((m, i) => [i, m && m.slice()])) };
+        this.render(); return;
+      }
+      if (edit && e.shiftKey) { drag = { type: 'band', x: px, y: py, add: e.ctrlKey || e.metaKey }; this.band = [px, py, px, py]; return; }
       drag = { type: 'pan', x: e.clientX, y: e.clientY, cu: this.cu, cv: this.cv0, moved: false, button: e.button };
     });
     cv.addEventListener('pointermove', e => {
@@ -315,35 +470,55 @@ UI.SectionEditor = class {
       const [px, py] = pos(e);
       let w = this.toW(px, py);
       this._snap = null;
-      if (e.shiftKey && (this.tool === 'draw' || (drag && drag.type === 'vertex'))) {
+      const single = drag && drag.type === 'vertex' && this.sel.size === 1;
+      if (e.shiftKey && (this.tool === 'draw' || single || (drag && drag.type === 'mid'))) {
         const q = this._nearestPoint(w[0], w[1]);
         if (q) { w = q.slice(); this._snap = q; }
       }
       this.mouse = w;
       UI.$('c2bSecInfo').textContent = 'u ' + w[0].toFixed(3) + ' m · Z ' + w[1].toFixed(3) + ' m';
+      if (drag && drag.type === 'mid') {
+        drag.moved = true;
+        this.prof().mids[drag.i] = [w[0], w[1]];
+        this.render(); return;
+      }
       if (drag && drag.type === 'vertex') {
         drag.moved = true;
-        this.prof().vertices[drag.i] = [w[0], w[1]];
-        this.render();
-        return;
+        const P = this.prof(), n = P.vertices.length;
+        const dx = w[0] - drag.start[0], dy = w[1] - drag.start[1];
+        if (single) P.vertices[drag.i] = [w[0], w[1]];
+        else drag.orig.forEach((p, i) => { P.vertices[i] = [p[0] + dx, p[1] + dy]; });
+        // Bögen, deren beide Enden mitbewegt werden, verschieben sich mit
+        if (P.mids && !single) P.mids.forEach((m, i) => { if (m && drag.orig.has(i) && drag.orig.has((i + 1) % n)) { const o = drag.origMid.get(i); P.mids[i] = [o[0] + dx, o[1] + dy]; } });
+        this.render(); return;
       }
+      if (drag && drag.type === 'band') { this.band = [drag.x, drag.y, px, py]; this.render(); return; }
       if (drag && drag.type === 'pan') {
         const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
         if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
         if (drag.moved) { this.cu = drag.cu - dx / this.scale; this.cv0 = drag.cv + dy / this.scale; this.render(); }
         return;
       }
-      const hv = this.tool === 'edit' ? this._hitVertex(px, py) : -1;
-      const he = hv < 0 && this.tool !== 'draw' ? this._hitEdge(px, py) : -1;
-      const hp = hv < 0 && he < 0 && this.tool !== 'draw' ? this._hitOtherProfile(px, py) : -1;
-      if (hv !== this.hoverV || he !== this.hoverE || hp !== this.hoverP || this.drawing) { this.hoverV = hv; this.hoverE = he; this.hoverP = hp; this.render(); }
-      cv.style.cursor = hv >= 0 ? 'move' : hp >= 0 ? 'pointer' : (this.tool === 'edit' ? (he >= 0 ? 'copy' : 'default') : 'crosshair');
+      const hm = this.tool === 'edit' ? this._hitMid(px, py) : -1;
+      const hv = this.tool === 'edit' && hm < 0 ? this._hitVertex(px, py) : -1;
+      const he = hv < 0 && hm < 0 && this.tool !== 'draw' ? this._hitEdge(px, py) : -1;
+      const hp = hv < 0 && he < 0 && hm < 0 && this.tool !== 'draw' ? this._hitOtherProfile(px, py) : -1;
+      if (hv !== this.hoverV || he !== this.hoverE || hp !== this.hoverP || hm !== this.hoverM || this.drawing) { this.hoverV = hv; this.hoverE = he; this.hoverP = hp; this.hoverM = hm; this.render(); }
+      cv.style.cursor = hv >= 0 || hm >= 0 ? 'move' : hp >= 0 ? 'pointer' : (this.tool === 'edit' ? (he >= 0 ? 'copy' : 'default') : 'crosshair');
     });
     cv.addEventListener('pointerup', e => {
       const d = drag; drag = null;
       if (!this.sec || !d) return;
-      if (d.type === 'vertex') {
+      if (d.type === 'none') return;
+      if (d.type === 'mid' || d.type === 'vertex') {
         if (d.moved) this._changed(false); else this.app.dropUndo();
+        return;
+      }
+      if (d.type === 'band') {
+        const [x0, y0, x1, y1] = this.band; this.band = null;
+        const P = this.prof();
+        const inside = P ? P.vertices.map((p, i) => [i, this.toS(p[0], p[1])]).filter(([, [x, y]]) => x >= Math.min(x0, x1) && x <= Math.max(x0, x1) && y >= Math.min(y0, y1) && y <= Math.max(y0, y1)).map(([i]) => i) : [];
+        this.setSel(d.add ? [...this.sel, ...inside] : inside);
         return;
       }
       if (d.moved || d.button !== 0) return;
@@ -369,16 +544,15 @@ UI.SectionEditor = class {
         else this.edgeSel = { a: ed, b: ed };
         this.app.onEdgeSelection(this.edgeSel);
         this.render();
-      } else {
-        this.selV = this._hitVertex(px, py);
-        this.render();
+      } else if (!(e.ctrlKey || e.metaKey)) {
+        this.setSel([]);   // Klick ins Leere hebt die Auswahl auf
       }
     });
     cv.addEventListener('dblclick', e => {
       if (this.sec && this.tool === 'mask') { e.preventDefault(); this._finishMask(); return; }
       if (!this.sec || this.tool !== 'edit' || !this.prof()) return;
       const [px, py] = pos(e);
-      if (this._hitVertex(px, py) >= 0) return;
+      if (this._hitVertex(px, py) >= 0 || this._hitMid(px, py) >= 0) return;
       const ed = this._hitEdge(px, py, 9);
       if (ed >= 0) {
         const P = this.prof();
@@ -386,24 +560,27 @@ UI.SectionEditor = class {
         const w = this.toW(px, py);
         const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy || 1;
         const t = Math.max(0, Math.min(1, ((w[0] - a[0]) * dx + (w[1] - a[1]) * dy) / L2));
-        this.insertVertex(ed, [a[0] + t * dx, a[1] + t * dy]);
+        this.insertVertex(ed, P.mids && P.mids[ed] ? w : [a[0] + t * dx, a[1] + t * dy]);
       }
     });
     cv.tabIndex = 0;
     cv.addEventListener('keydown', e => {
       if (!this.sec) return;
-      if ((e.key === 'Delete' || e.key === 'Backspace') && this.selV >= 0 && this.tool === 'edit') { e.preventDefault(); this.deleteVertex(this.selV); }
+      const mod = e.ctrlKey || e.metaKey;
+      if ((e.key === 'Delete' || e.key === 'Backspace') && this.sel.size && this.tool === 'edit') { e.preventDefault(); this.deleteVertices([...this.sel]); }
+      else if (mod && e.key.toLowerCase() === 'a' && this.prof()) { e.preventDefault(); this.setSel(this.prof().vertices.map((_, i) => i)); }
       else if (e.key === 'Enter' && this.tool === 'draw') { e.preventDefault(); this._finishDraw(false); }
       else if (e.key === 'Enter' && this.tool === 'mask') { e.preventDefault(); this._finishMask(); }
-      else if (e.key === 'Escape') { if (this.tool !== 'edit') this.app.setSecTool('edit'); else { this.selV = -1; this.render(); } }
+      else if (e.key === 'Escape') { if (this.tool !== 'edit') this.app.setSecTool('edit'); else this.setSel([]); }
       else if (e.key === 'Tab' && this.profiles().length > 1) { e.preventDefault(); this.setActive((this.pi + (e.shiftKey ? -1 : 1) + this.profiles().length) % this.profiles().length); }
-      else if (this.tool === 'edit' && this.selV >= 0 && e.key.startsWith('Arrow')) {
+      else if (this.tool === 'edit' && this.sel.size && e.key.startsWith('Arrow')) {
         e.preventDefault();
         const st = e.shiftKey ? 0.01 : 0.001;
-        const p = this.prof().vertices[this.selV];
+        const dx = e.key === 'ArrowLeft' ? -st : e.key === 'ArrowRight' ? st : 0, dy = e.key === 'ArrowUp' ? st : e.key === 'ArrowDown' ? -st : 0;
+        const P = this.prof(), n = P.vertices.length;
         this.app.pushUndo();
-        if (e.key === 'ArrowLeft') p[0] -= st; if (e.key === 'ArrowRight') p[0] += st;
-        if (e.key === 'ArrowUp') p[1] += st; if (e.key === 'ArrowDown') p[1] -= st;
+        this.sel.forEach(i => { P.vertices[i] = [P.vertices[i][0] + dx, P.vertices[i][1] + dy]; });
+        if (P.mids) P.mids.forEach((m, i) => { if (m && this.sel.has(i) && this.sel.has((i + 1) % n)) P.mids[i] = [m[0] + dx, m[1] + dy]; });
         this._changed(false);
       }
     });
@@ -429,6 +606,7 @@ UI.SectionEditor = class {
     const list = this.profiles();
     list.push(P);
     this.pi = list.length - 1;
+    this.sel = new Set();
     this.drawing = null;
     this.app.setSecTool('edit');
     this.app.onActiveProfile();

@@ -107,8 +107,9 @@ UI.View3D = class {
         new THREE.LineBasicMaterial({ color: cur ? 0xD70036 : 0x8E8E93, transparent: true, opacity: cur ? 0.9 : 0.3 })));
       P.forEach(pr => {
         if (pr.vertices.length < 2) return;
-        const pts = pr.vertices.map(p => W(s, p));
-        if (pr.closed) pts.push(pts[0].clone());
+        const ex = C2B.arc.expand(pr);
+        const pts = ex.vertices.map(p => W(s, p));
+        if (ex.closed) pts.push(pts[0].clone());
         this.groups.sections.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: cur ? 0xD70036 : 0x2D8653 })));
       });
       // Bauteilflächen

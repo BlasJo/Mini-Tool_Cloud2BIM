@@ -274,8 +274,11 @@ C2B.sec = (() => {
   function cornerFromLines(V, lines, closed, maxShift) {
     const ne = lines.length;
     return V.map((v, k) => {
-      const pe = closed ? (k - 1 + ne) % ne : (k > 0 ? k - 1 : null);
-      const nx = k < ne ? k : null;
+      let pe = closed ? (k - 1 + ne) % ne : (k > 0 ? k - 1 : null);
+      let nx = k < ne ? k : null;
+      // Bogenkanten haben keine Gerade (null): Ecke nur auf die gerade Nachbarkante legen
+      if (pe !== null && !lines[pe]) pe = null;
+      if (nx !== null && !lines[nx]) nx = null;
       let c;
       if (pe !== null && nx !== null) {
         c = g2.intersectLines(lines[pe], lines[nx], MIN_SIN);
@@ -458,7 +461,57 @@ C2B.sec = (() => {
    * Verschiebung (robuste ICP, nur Translation), dann Geradenausgleich je Kante.
    * Die Topologie bleibt erhalten -> konsistente Interpolation zwischen Querschnitten.
    */
-  function fitTemplate(template, closed, uv, search = 0.15, align = true, iterations = 3) {
+  /**
+   * Verschiebung (Translation) einer Profil-Polylinie auf die Punkte: Punkt-zu-Gerade-Ausgleich
+   * (jeder Abtastpunkt wirkt nur senkrecht zu seiner Kante; lange Wände verfälschen die Höhe nicht).
+   */
+  function alignShift(V, closed, uv, search, nearest) {
+    if (!nearest) nearest = makeNearest(uv, search);
+    const E = g2.edges(V, closed);
+    const L = g2.polylineLength(V, closed);
+    const step = Math.max(search / 4, 0.01, L / 400);
+    const S = [];
+    E.forEach(([a, b]) => {
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]); if (len < 1e-9) return;
+      const n = [(b[1] - a[1]) / len, -(b[0] - a[0]) / len];
+      const k = Math.max(1, Math.round(len / step));
+      for (let i = 0; i < k; i++) { const t = (i + 0.5) / k; S.push({ p: [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])], n }); }
+    });
+    let sx = 0, sy = 0;
+    for (let it = 0; it < 25; it++) {
+      let a11 = 0, a12 = 0, a22 = 0, b1 = 0, b2 = 0, cnt = 0;
+      const lim = it < 3 ? search * 2 : search;
+      for (const { p, n } of S) {
+        const j = nearest(p[0] + sx, p[1] + sy, lim);
+        if (j < 0) continue;
+        const r = n[0] * (uv[j][0] - p[0] - sx) + n[1] * (uv[j][1] - p[1] - sy);
+        a11 += n[0] * n[0]; a12 += n[0] * n[1]; a22 += n[1] * n[1]; b1 += n[0] * r; b2 += n[1] * r; cnt++;
+      }
+      if (cnt < 5) break;
+      const det = a11 * a22 - a12 * a12;
+      if (Math.abs(det) < 1e-9 * cnt * cnt) break;   // nur eine Richtung bestimmt (z. B. nur eine Wand)
+      const dx = (a22 * b1 - a12 * b2) / det, dy = (a11 * b2 - a12 * b1) / det;
+      sx += dx; sy += dy;
+      if (Math.hypot(dx, dy) < 1e-5) break;
+    }
+    return [sx, sy];
+  }
+
+  function makeNearest(uv, cs) {
+    const grid = new Map(), key = (ix, iy) => ix * 1048576 + iy;
+    uv.forEach((p, i) => { const k = key(Math.floor(p[0] / cs), Math.floor(p[1] / cs)); if (!grid.has(k)) grid.set(k, []); grid.get(k).push(i); });
+    return (x, y, rmax) => {
+      const ix = Math.floor(x / cs), iy = Math.floor(y / cs), R = Math.ceil(rmax / cs);
+      let best = -1, bd = rmax * rmax;
+      for (let a = -R; a <= R; a++) for (let b = -R; b <= R; b++) {
+        const l = grid.get(key(ix + a, iy + b)); if (!l) continue;
+        for (const j of l) { const d = (uv[j][0] - x) ** 2 + (uv[j][1] - y) ** 2; if (d < bd) { bd = d; best = j; } }
+      }
+      return best;
+    };
+  }
+
+  function fitTemplate(template, closed, uv, search = 0.15, align = true, iterations = 3, skipEdges = null) {
     let V = template.map(p => p.slice());
     if (uv.length < 5 || V.length < 2) return { vertices: V, closed };
     const grid = new Map();
@@ -481,22 +534,7 @@ C2B.sec = (() => {
       return best;
     };
     if (align) {
-      const L = g2.polylineLength(V, closed);
-      const ns = Math.max(20, Math.min(400, Math.round(L / Math.max(search / 4, 0.01))));
-      const S = g2.resample(V, ns, closed);
-      let sx = 0, sy = 0;
-      for (let it = 0; it < 20; it++) {
-        const dx = [], dy = [];
-        for (const p of S) {
-          const j = nearest(p[0] + sx, p[1] + sy, search * 2);
-          if (j >= 0) { dx.push(uv[j][0] - p[0] - sx); dy.push(uv[j][1] - p[1] - sy); }
-        }
-        if (dx.length < 5) break;
-        const med = a => { a.sort((x, y) => x - y); return a[a.length >> 1]; };
-        const mx = med(dx), my = med(dy);
-        sx += mx; sy += my;
-        if (Math.hypot(mx, my) < 1e-4) break;
-      }
+      const [sx, sy] = alignShift(V, closed, uv, search, nearest);
       V = V.map(p => [p[0] + sx, p[1] + sy]);
     }
     const ne = g2.edgeCount(V.length, closed);
@@ -504,6 +542,7 @@ C2B.sec = (() => {
       const { dist, seg } = g2.distancesToPolyline(uv, V, closed);
       const E = g2.edges(V, closed);
       const lines = E.map(([a, b], e) => {
+        if (skipEdges && skipEdges.has(e)) return null;   // Bogenkante
         let pts = [];
         for (let i = 0; i < uv.length; i++) if (seg[i] === e && dist[i] <= search) pts.push(uv[i]);
         if (pts.length >= 5) {
@@ -523,8 +562,28 @@ C2B.sec = (() => {
 
   /** Alle Teilprofile eines Vorlage-Querschnitts an neue Punkte anpassen (Bauteile werden kopiert). */
   function fitSection(templateSec, uv, search = 0.15) {
-    return profilesOf(templateSec).filter(p => p.vertices.length >= 2).map(p =>
-      Object.assign(fitTemplate(p.vertices, p.closed, uv, search), { components: JSON.parse(JSON.stringify(p.components || [])) }));
+    return profilesOf(templateSec).filter(p => p.vertices.length >= 2).map(p => fitProfile(p, uv, search, true));
+  }
+
+  /** Ein Teilprofil (inkl. Bögen) an Punkte anpassen; Bauteile werden kopiert. */
+  function fitProfile(p, uv, search = 0.15, align = true) {
+    const arcs = new Set();
+    (p.mids || []).forEach((m, i) => { if (m) arcs.add(i); });
+    let sx = 0, sy = 0;
+    if (align && uv.length >= 5) [sx, sy] = alignShift(C2B.arc.expand(p).vertices, !!p.closed && p.vertices.length >= 3, uv, search);
+    const V0 = p.vertices.map(q => [q[0] + sx, q[1] + sy]);
+    const f = fitTemplate(V0, p.closed, uv, search, false, 3, arcs.size ? arcs : null);
+    const out = Object.assign(f, { components: JSON.parse(JSON.stringify(p.components || [])) });
+    if (arcs.size) {
+      const n = f.vertices.length;
+      out.mids = p.mids.map((m, i) => {
+        if (!m) return null;
+        const a = f.vertices[i], b = f.vertices[(i + 1) % n];
+        const s0 = C2B.arc.sagittaOf(p.vertices[i], m, p.vertices[(i + 1) % n]);
+        return C2B.arc.midFromSagitta(a, b, C2B.arc.fitSagitta(a, b, uv, s0, search));
+      });
+    }
+    return out;
   }
 
   // ─────────────────────────────────────────────── Bauteil-Vorschlag
@@ -587,6 +646,6 @@ C2B.sec = (() => {
 
   return { frame, uvToWorld, worldToUv, extractPoints, newSection, generateAlongAxis, orderedPath,
     autoProfile, autoProfiles, fitTemplate, suggestComponents, componentEdges, TYPE_LABEL, uid,
-    profilesOf, allComponents, nVertices, fitSection, DEFAULT_MAX_GAP,
+    profilesOf, allComponents, nVertices, fitSection, fitProfile, DEFAULT_MAX_GAP,
     _internals: { nnSpacing, denoise, dropSmallClusters } };
 })();

@@ -2,6 +2,14 @@
 
 Neueste Fassung zuerst.
 
+## 1.3.0 (17.11.2026)
+
+- **Mehrfachauswahl** im Querschnitt: Strg+Klick schaltet Ecken um, Shift+Ziehen zieht ein Auswahlrechteck, Strg+A wählt alle Ecken des aktiven Teilprofils, Klick ins Leere/Esc hebt die Auswahl auf. Gewählte Ecken werden gemeinsam gelöscht (Entf, Rechtsklick, «Ecken löschen») und gemeinsam verschoben (Ziehen, Pfeiltasten).
+- **Kreisbögen**: Kante = Bogen durch Anfang, Ende und Bogenpunkt (runder Griff, ziehbar; Radius wird angezeigt). «◠ Bogen» macht aus zwei benachbarten gewählten Ecken einen Bogen oder ersetzt eine gewählte Eckenkette (z. B. Gewölbe aus dem Vorschlag) durch einen einzigen Bogen; der Bogenpunkt wird robust in die Punkte eingepasst. «Gerade» macht Bögen wieder gerade. Doppelklick auf einen Bogen teilt ihn. Bögen wirken in Abweichung, Bauteilen (Versatz), Volumenkörpern/IFC (48 Segmente je Bogen), Drahtmodell, «Anpassen», «Aus Vorgänger» und «Profil auf alle»; Ebenen lassen Bögen unverändert.
+- **Schnitttiefe je Querschnitt** im Querschnitt-Kopf (mit «für alle»); im Grundriss als Streifen beim aktuellen Querschnitt sichtbar.
+- Vorlage anpassen: Verschiebung neu über Punkt-zu-Geraden-Ausgleich (lange Wände verfälschen die Höhenlage nicht mehr).
+- Beispiel `beispiel/Demo_Gewoelbe.laz` (Gewölbe R 3.0 m, Achse E 2601000 / N 1200000.5 → N 1200014.5).
+
 ## 1.2.0 (17.11.2026)
 
 - **Ausschneiden** (Schritt 2, Grundriss): Polygon zeichnen, «Bereich behalten» oder «Bereich entfernen», optional nur in einem Höhenbereich. Die Bereiche werden im Projekt gespeichert, lassen sich einzeln löschen und rückgängig machen; das Ausdünnen bleibt davon getrennt.

@@ -55,6 +55,13 @@
             <button type="button" id="c2bMaskAll" title="Ausblend-Polygone dieses Querschnitts auf alle Querschnitte übertragen (gleiche Lage relativ zur Achse)" disabled>Masken auf alle</button>
             <button type="button" id="c2bMaskClear" title="Ausblend-Polygone dieses Querschnitts löschen" disabled>Masken löschen</button>
           </span>
+          <span class="c2b-tb">
+            <button type="button" id="c2bArc" title="Gewählte Kante (2 benachbarte Ecken) oder Eckenkette zu einem Bogen machen; Bogenpunkt wird in die Punkte eingepasst" disabled>◠ Bogen</button>
+            <button type="button" id="c2bLine" title="Bögen zwischen den gewählten Ecken (ohne Auswahl: alle) wieder zu Geraden" disabled>Gerade</button>
+            <button type="button" id="c2bDelSel" title="Gewählte Ecken löschen (Entf)" disabled>Ecken löschen</button>
+          </span>
+          <label title="Dicke der Scheibe, aus der die Punkte dieses Querschnitts stammen">Schnitttiefe <input type="number" id="c2bSecDepth" min="1" step="10" value="50"> mm</label>
+          <button type="button" class="c2b-btn" id="c2bSecDepthAll" title="Schnitttiefe dieses Querschnitts für alle Querschnitte übernehmen">für alle</button>
           <button type="button" class="c2b-btn" id="c2bPlApply" title="Ebenen-Schnittlinien in die Profile dieses Querschnitts übernehmen" disabled>Ebenen anwenden</button>
           <button type="button" class="c2b-btn" id="c2bSecFit" title="Ansicht einpassen">⤢</button>
         </div>
@@ -80,6 +87,7 @@
         <div class="c2b-help" id="c2bSecHelp" hidden>
           <span class="c2b-kbd">Mausrad</span> Zoom · <span class="c2b-kbd">Ziehen</span> verschieben ·
           <span class="c2b-kbd">Doppelklick</span> Ecke einfügen · <span class="c2b-kbd">Entf</span>/<span class="c2b-kbd">Rechtsklick</span> Ecke löschen ·
+          <span class="c2b-kbd">Strg+Klick</span>/<span class="c2b-kbd">Shift+Ziehen</span>/<span class="c2b-kbd">Strg+A</span> mehrere Ecken wählen · runder Griff = Bogenpunkt ziehen ·
           <span class="c2b-kbd">Shift</span> an Punkt fangen · <span class="c2b-kbd">Tab</span> Teilprofil wechseln · <span class="c2b-kbd">Strg+Z</span> rückgängig
         </div>
       </section>
