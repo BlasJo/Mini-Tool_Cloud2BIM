@@ -13,6 +13,7 @@ UI.PlanView = class {
   }
 
   setCloud(cloud, colors) { this.cloud = cloud; this.colors = colors; this.render(); }
+  setColors(colors) { this.colors = colors; this.render(); }
 
   fit() {
     const c = this.cloud;

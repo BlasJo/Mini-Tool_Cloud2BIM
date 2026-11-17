@@ -123,6 +123,12 @@
             <button class="sidebar-btn sidebar-btn-primary" id="c2bBuild" type="button" disabled>3D-Modell erzeugen</button>
           </div>
           <div class="c2b-stat" id="c2bBuildStat"></div>
+          <div class="c2b-sub">Abgleich Modell ↔ Punktwolke</div>
+          <div class="c2b-note">Abstand jedes Punkts zur interpolierten Innenfläche; Einfärbung nach der Farbskala (Einstellungen).</div>
+          <button class="sidebar-btn sidebar-btn-primary" id="c2bDevRun" type="button" disabled>Abweichung berechnen</button>
+          <label class="c2b-check c2b-mt"><input type="checkbox" id="c2bDevShow" disabled><span>Punktwolke nach Abweichung einfärben</span></label>
+          <div class="c2b-stat" id="c2bDevStat"></div>
+          <button class="sidebar-btn sidebar-btn-secondary c2b-mt" id="c2bDevPly" type="button" disabled title="Angezeigte Punkte mit Farbe und Abstand (Spalte distance, m; -1 = ausserhalb) als PLY">Eingefärbte Punkte als PLY</button>
         </div>
       </details>
 
@@ -185,6 +191,16 @@
         <div class="c2b-sub">Profil-Werkzeuge</div>
         <div class="param" title="Suchbereich beim Anpassen einer Vorlage an einen anderen Querschnitt"><span class="c2b-grow">Suchbereich Vorlage</span><input type="number" id="c2bFitSearch" min="10" step="10" value="150"><span class="c2b-unit">mm</span></div>
         <div class="param" title="Punkte weiter weg vom Profil gelten als Fremdobjekte (Einbauten) und zählen nicht zur Abweichung"><span class="c2b-grow">Fremdobjekte ab</span><input type="number" id="c2bBand" min="10" step="10" value="100"><span class="c2b-unit">mm</span></div>
+        <div class="c2b-sub">Farbskala Abweichung (Modell ↔ Punktwolke)</div>
+        <div id="c2bDevScaleEd"></div>
+        <input type="hidden" id="c2bDevScale" value="">
+        <div class="param" title="Farbe für Abstände über der letzten Stufe bis zur Suchgrenze"><span class="c2b-grow">über letzter Stufe</span><input type="color" id="c2bDevAbove" value="#1F6FB2"><span class="c2b-unit"></span></div>
+        <div class="param" title="Punkte weiter als die Suchgrenze von der Modellfläche (z. B. Einbauten, ausserhalb des Modells)"><span class="c2b-grow">Suchgrenze</span><input type="number" id="c2bDevMax" min="5" step="10" value="100"><span class="c2b-unit">mm</span></div>
+        <div class="param"><span class="c2b-grow">Farbe ausserhalb</span><input type="color" id="c2bDevOut" value="#B4B4B9"><span class="c2b-unit"></span></div>
+        <div class="btn-row">
+          <button class="sidebar-btn sidebar-btn-secondary" id="c2bDevAdd" type="button">+ Stufe</button>
+          <button class="sidebar-btn sidebar-btn-secondary" id="c2bDevDefault" type="button" title="Standardskala: ≤ 2 mm grün, ≤ 4 orange, ≤ 10 rot, ≤ 20 violett, darüber blau; Suchgrenze 100 mm">Standard</button>
+        </div>
         <div class="c2b-note">Werte werden lokal im Browser gespeichert (nur Einstellungen, keine Projektdaten).</div>
 {{DRAWER_LOG}}
   </aside>

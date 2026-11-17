@@ -250,6 +250,28 @@ await step('Gewölbe: Mehrfachauswahl, Bogen, Schnitttiefe', async () => {
   const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#c2bExpIfc')]);
   await dl.saveAs(path.join(out, 'gewoelbe.ifc'));
 });
+await step('Abgleich Modell ↔ Punktwolke (Gewölbe)', async () => {
+  await page.evaluate(() => { document.getElementById('c2bStep5').open = true; });
+  await page.click('#c2bShowCloud').catch(() => {});
+  if (await page.$eval('#c2bShowCloud', b => b.getAttribute('aria-pressed')) !== 'true') await page.click('#c2bShowCloud');
+  await page.click('#c2bDevRun');
+  await page.waitForFunction(() => window.BSTool.APP.dev && window.BSTool.APP.dev.res, null, { timeout: 60000 });
+  const r = await page.evaluate(() => { const d = window.BSTool.APP.dev; return { n: d.dist.length, counts: d.res.counts, mean: d.res.mean, p95: d.res.p95, legend: !document.getElementById('c2bDevLegend').hidden }; });
+  console.log('   Abgleich:', JSON.stringify({ n: r.n, counts: r.counts, mean_mm: +(r.mean * 1000).toFixed(2), p95_mm: +(r.p95 * 1000).toFixed(2), legende: r.legend }));
+  if (!r.legend || !(r.mean < 0.004)) throw new Error('Abgleich unplausibel');
+  await page.click('#c2bFit'); await page.waitForTimeout(300);
+  await page.screenshot({ path: path.join(out, 'e2e_11_abgleich.png') });
+  // Skala anpassen: erste Stufe 3 mm
+  await page.evaluate(() => { const i = document.querySelector('#c2bDevScaleEd input[data-k="0"][data-f="mm"]'); i.value = '3'; i.dispatchEvent(new Event('change', { bubbles: true })); });
+  const c2 = await page.evaluate(() => window.BSTool.APP.dev.res.counts);
+  console.log('   Stufe 1 auf 3 mm: Anteil grün', r.counts[0], '->', c2[0]);
+  if (!(c2[0] > r.counts[0])) throw new Error('Skala wirkt nicht');
+  await page.click('#c2bDevDefault');
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#c2bDevPly')]);
+  await dl.saveAs(path.join(out, 'abweichung.ply'));
+  await page.click('#c2bTabPlan'); await page.waitForTimeout(200);
+  await page.screenshot({ path: path.join(out, 'e2e_12_abgleich_grundriss.png') });
+});
 console.log('--- Log ---\n' + (await log()));
 await browser.close();
 if (errors.length) { console.log('FEHLER:\n' + errors.join('\n')); process.exit(1); }

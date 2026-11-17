@@ -2,6 +2,13 @@
 
 Neueste Fassung zuerst.
 
+## 1.4.0 (17.11.2026)
+
+- **Abgleich Modell ↔ Punktwolke** (Schritt 5): Für jeden angezeigten Punkt wird der kürzeste Abstand zur interpolierten Innenfläche berechnet (gleiche Interpolation wie Volumenkörper/Drahtmodell, Bögen aufgelöst; räumliches Raster, ca. 0.4 s für 400'000 Punkte). Die Punktwolke wird in 3D und im Grundriss nach einer Farbskala eingefärbt; Legende mit Anteilen je Stufe, Mittel, Median, 95 %. Volumenkörper/Flächen werden dazu im 3D ausgeblendet (Schalter oben).
+- **Farbskala** in den Einstellungen: Stufen (obere Grenze in mm) und Farben frei, «+ Stufe», Stufe entfernen, «Standard» (≤ 2 mm grün, ≤ 4 orange, ≤ 10 rot, ≤ 20 violett, darüber blau). Suchgrenze (Vorgabe 100 mm): weiter entfernte Punkte (Einbauten, ausserhalb der Querschnitte) werden grau. Änderungen der Skala wirken sofort; Modelländerungen werden als «neu berechnen» markiert.
+- Export der eingefärbten Punkte als binäres **PLY** (globale Koordinaten, RGB, Spalte `distance` in m, −1 = ausserhalb).
+- «Neu beginnen» setzt auch den Horizontalschnitt im Grundriss zurück.
+
 ## 1.3.0 (17.11.2026)
 
 - **Mehrfachauswahl** im Querschnitt: Strg+Klick schaltet Ecken um, Shift+Ziehen zieht ein Auswahlrechteck, Strg+A wählt alle Ecken des aktiven Teilprofils, Klick ins Leere/Esc hebt die Auswahl auf. Gewählte Ecken werden gemeinsam gelöscht (Entf, Rechtsklick, «Ecken löschen») und gemeinsam verschoben (Ziehen, Pfeiltasten).

@@ -54,6 +54,14 @@ UI.View3D = class {
 
   setVisible(key, v) { this.groups[key].visible = v; this.render(); }
 
+  /** Nur die Punktfarben tauschen (z. B. Abweichungs-Einfärbung). */
+  setColors(colors) {
+    const pts = this.groups.cloud.children[0];
+    if (!pts) return;
+    pts.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3, true));
+    this.render();
+  }
+
   setCloud(cloud, colors) {
     this._clear(this.groups.cloud);
     if (!cloud || !cloud.n) return this.render();

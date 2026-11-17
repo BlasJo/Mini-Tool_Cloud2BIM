@@ -13,6 +13,7 @@ const APP = {
     try { this.v3d = new UI.View3D(UI.$('c2b3dHost'), this); }
     catch (e) { UI.log('3D-Ansicht nicht verfügbar (WebGL): ' + e.message, 'err'); this.v3d = null; }
     this.ed = new UI.SectionEditor(UI.$('c2bSec'), this);
+    this.renderDevScale();
     this._bindSidebar();
     this._bindMain();
     this._bindKeys();
@@ -63,7 +64,9 @@ const APP = {
         this.renderCrops(); this.renderPlanes();
         this.curSecId = null; this.curColId = null; this.solids = null; this.modelBuilt = false;
         if (this.v3d) { this.v3d.setModel([], []); this.v3d.setWire([]); }
-        ['c2bAxS_E', 'c2bAxS_N', 'c2bAxE_E', 'c2bAxE_N'].forEach(id => { UI.$(id).value = ''; });
+        ['c2bAxS_E', 'c2bAxS_N', 'c2bAxE_E', 'c2bAxE_N', 'c2bSliceZ'].forEach(id => { UI.$(id).value = ''; });
+        UI.$('c2bSliceDz').value = '0'; this.plan.sliceZ = null; this.plan.sliceDz = 0;
+        this.invalidateDev();
         UI.$('c2bBuildStat').textContent = '';
         this.selectSection(null);
       }
@@ -117,6 +120,7 @@ const APP = {
     if (UI.$('c2bSliceZ').value === '') UI.$('c2bSliceZ').value = ((bb.min[2] + bb.max[2]) / 2).toFixed(2);
     this.plan.setCloud(this.display, this.colors);
     if (this.v3d) { this.v3d.setCloud(this.display, this.colors); this.v3d.setPointSize(UI.num('c2bPtSize', 2)); }
+    if (this.dev && this.dev.display !== this.display) this.invalidateDev(); else this.applyCloudColors();
     UI.$('c2bLeftEmpty').hidden = true;
     if (fit) { this.plan.fit(); if (this.v3d) this.v3d.fit(); }
     this.refreshSections3d();
@@ -803,9 +807,114 @@ const APP = {
     }).join('') || `<tr><td colspan="7" class="c2b-mute" style="padding:6px">Noch keine Bauteile${this.profs(s).length > 1 ? ' in Profil ' + (this.ed.pi + 1) : ''} – «Bauteile vorschlagen» oder Kanten wählen.</td></tr>`;
   },
 
+  // ───────────────────────────────────────────── Abgleich Modell ↔ Punktwolke
+  /** Farbskala aus den Einstellungen (Stufen in mm, aufsteigend). */
+  devScale() {
+    const D = C2B.dev.DEFAULT_SCALE;
+    let cls = null;
+    try { cls = JSON.parse(UI.$('c2bDevScale').value || 'null'); } catch (e) { cls = null; }
+    if (!Array.isArray(cls) || !cls.length) cls = D.classes.map(c => ({ mm: c.max * 1000, color: c.color }));
+    return { classes: cls.filter(c => c.mm > 0).map(c => ({ max: c.mm / 1000, color: c.color })).sort((a, b) => a.max - b.max),
+      aboveColor: UI.$('c2bDevAbove').value || D.aboveColor, outColor: UI.$('c2bDevOut').value || D.outColor,
+      searchMax: Math.max(0.005, UI.mm('c2bDevMax', D.searchMax)) };
+  },
+
+  setDevScaleRows(rows) {
+    UI.$('c2bDevScale').value = JSON.stringify(rows.slice().sort((a, b) => a.mm - b.mm));
+    UI.saveSettings(); this.renderDevScale(); this.recolorDev();
+  },
+
+  renderDevScale() {
+    const cls = this.devScale().classes;
+    UI.$('c2bDevScaleEd').innerHTML = cls.map((c, i) => `<div class="c2b-scale-row"><span>${i ? 'bis' : '≤'}</span>` +
+      `<input type="number" data-k="${i}" data-f="mm" min="0.1" step="0.5" value="${+(c.max * 1000).toFixed(2)}" title="obere Grenze der Stufe in mm">` +
+      `<input type="color" data-k="${i}" data-f="color" value="${c.color}"><button type="button" data-del="${i}" title="Stufe entfernen">×</button></div>`).join('');
+  },
+
+  devRows() { return this.devScale().classes.map(c => ({ mm: +(c.max * 1000).toFixed(3), color: c.color })); },
+
+  async runDeviation() {
+    if (!this.display) return;
+    const scale = this.devScale();
+    const surf = C2B.dev.surfaceTriangles(this.project);
+    if (!surf.n) return UI.alert('Abgleich', 'Für die Interpolation braucht es mindestens zwei benachbarte Querschnitte mit Profil (gleiche Teilprofile).');
+    const t0 = performance.now();
+    UI.progress(0, 'Abweichung: Fläche vorbereiten …'); await UI.tick();
+    const idx = C2B.dev.buildIndex(surf, scale.searchMax);
+    const c = this.display, out = new Float32Array(c.n), chunk = 100000;
+    for (let i = 0; i < c.n; i += chunk) {
+      C2B.dev.distances(idx, c, out, i, Math.min(c.n, i + chunk));
+      UI.progress(i / c.n, `Abweichung ${Math.round(100 * i / c.n)} % · ${UI.fmtInt(i)} Punkte`);
+      await UI.tick();
+    }
+    UI.progress(null);
+    this.dev = { dist: out, pad: scale.searchMax, display: c, stale: false };
+    UI.$('c2bDevShow').disabled = false; UI.$('c2bDevShow').checked = true;
+    this.recolorDev();
+    // Volumenkörper und Flächen verdecken die eingefärbten Punkte: im 3D ausblenden
+    [['c2bShowModel', ['model', 'wire']], ['c2bShowAreas', ['areas']], ['c2bShowInterp', ['interp']], ['c2bShowCloud', null]].forEach(([id, groups]) => {
+      const on = !groups;
+      UI.$(id).setAttribute('aria-pressed', on);
+      if (this.v3d) (groups || ['cloud']).forEach(g => this.v3d.setVisible(g, on));
+    });
+    const r = this.dev.res;
+    UI.log(`Abgleich: ${UI.fmtInt(c.n)} Punkte gegen ${UI.fmtInt(surf.n)} Dreiecke der interpolierten Fläche in ${((performance.now() - t0) / 1000).toFixed(1)} s · ` +
+      `Mittel ${UI.fmtMM(r.mean)}, 95 % ${UI.fmtMM(r.p95)}, ${(100 * r.nOut / c.n).toFixed(1)} % ausserhalb der Suchgrenze.`);
+    this.updateButtons();
+  },
+
+  recolorDev() {
+    if (!this.dev) return;
+    const scale = this.devScale();
+    this.dev.res = C2B.dev.colorize(this.dev.dist, scale);
+    this.dev.scale = scale;
+    this.applyCloudColors();
+    this.renderDevStats();
+  },
+
+  /** Punktwolke normal oder nach Abweichung einfärben (3D und Grundriss). */
+  applyCloudColors() {
+    const on = !!(this.dev && this.dev.res && UI.$('c2bDevShow').checked && this.dev.display === this.display);
+    const cols = on ? this.dev.res.colors : this.colors;
+    if (cols) { this.plan.setColors(cols); if (this.v3d) this.v3d.setColors(cols); }
+    UI.$('c2bDevLegend').hidden = !on;
+  },
+
+  invalidateDev() {
+    if (!this.dev) return;
+    this.dev = null;
+    UI.$('c2bDevShow').checked = false; UI.$('c2bDevShow').disabled = true;
+    UI.$('c2bDevLegend').hidden = true; UI.$('c2bDevStat').textContent = '';
+    this.updateButtons();
+  },
+
+  renderDevStats() {
+    const d = this.dev;
+    if (!d || !d.res) { UI.$('c2bDevStat').textContent = ''; return; }
+    const r = d.res, sc = d.scale, n = d.dist.length, k = sc.classes.length;
+    const mm = x => +(x * 1000).toFixed(1);
+    const labels = sc.classes.map((c, i) => (i ? `${mm(sc.classes[i - 1].max)}–${mm(c.max)} mm` : `≤ ${mm(c.max)} mm`))
+      .concat([`> ${mm(sc.classes[k - 1].max)} mm`, `ausserhalb (> ${mm(sc.searchMax)} mm)`]);
+    const colors = sc.classes.map(c => c.color).concat([sc.aboveColor, sc.outColor]);
+    const pct = (c, base) => (base ? (100 * c / base).toFixed(1) + ' %' : '–');
+    const rows = labels.map((l, i) => `<div class="c2b-dl-row"><span class="c2b-dl-sw" style="background:${colors[i]}"></span><span>${l}</span><span class="c2b-dl-pct">${pct(r.counts[i], i <= k ? r.nUsed : n)}</span></div>`).join('');
+    const stale = d.stale ? '<div class="c2b-bad" style="margin-top:4px">Modell geändert – neu berechnen</div>' : '';
+    const grow = sc.searchMax > d.pad + 1e-9 ? '<div class="c2b-bad" style="margin-top:4px">Suchgrenze vergrössert – neu berechnen</div>' : '';
+    UI.$('c2bDevLegend').innerHTML = `<div style="font-weight:600;margin-bottom:3px">Abweichung zum Modell</div>${rows}` +
+      `<div style="margin-top:4px">Mittel <b>${UI.fmtMM(r.mean)}</b> · 95 % <b>${UI.fmtMM(r.p95)}</b></div>${stale}${grow}`;
+    UI.$('c2bDevStat').innerHTML = `${UI.fmtInt(n)} Punkte, ${UI.fmtInt(r.nUsed)} am Modell<br>Mittel ${UI.fmtMM(r.mean)} · Median ${UI.fmtMM(r.median)} · 95 % ${UI.fmtMM(r.p95)}<br>` +
+      `${labels.slice(0, k + 1).map((l, i) => `<span style="color:${colors[i]}">■</span> ${pct(r.counts[i], r.nUsed)}`).join(' ')}` + stale + grow;
+  },
+
+  exportDevPly() {
+    if (!this.dev || !this.dev.res) return;
+    UI.download(this.baseName() + '_Abweichung.ply', C2B.dev.buildPly(this.dev.display, this.dev.res.colors, this.dev.dist), 'application/octet-stream');
+  },
+
   // ───────────────────────────────────────────── Modell
   /** Modell (interpolierte Volumenkörper) läuft im 3D immer mit, sobald Bauteile oder Stützen bestehen. */
   modelDirty() {
+    if (this.dev && !this.dev.stale) { this.dev.stale = true; this.renderDevStats(); }
     const any = this.project.sections.some(s => C2B.sec.allComponents(s).length) || this.project.columns.length;
     clearTimeout(this._tm);
     if (any || this.modelBuilt) this._tm = setTimeout(() => this.buildModel(true), 400);
@@ -983,6 +1092,8 @@ const APP = {
     set('c2bCompAutoAll', nS > 0); set('c2bCompCopy', s && C2B.sec.allComponents(s).length > 0 && nS > 1);
     set('c2bBuild', anyComp || this.project.columns.length > 0);
     set('c2bColPlace', has);
+    set('c2bDevRun', has && this.project.sections.filter(x => this.hasProfile(x)).length >= 2);
+    set('c2bDevPly', !!(this.dev && this.dev.res));
     set('c2bExpIfc', anyComp || this.project.columns.length > 0);
     const anyProf = this.project.sections.some(x => this.hasProfile(x));
     set('c2bExpDxf', anyProf); set('c2bExpObj', anyProf);
@@ -1084,6 +1195,31 @@ const APP = {
     $('c2bCompAutoAll').addEventListener('click', () => this.suggestAll());
     $('c2bCompCopy').addEventListener('click', () => this.copyComponents());
     $('c2bBuild').addEventListener('click', () => this.buildModel(false));
+    $('c2bDevRun').addEventListener('click', () => this.runDeviation());
+    $('c2bDevShow').addEventListener('change', () => this.applyCloudColors());
+    $('c2bDevPly').addEventListener('click', () => this.exportDevPly());
+    $('c2bDevScaleEd').addEventListener('change', e => {
+      const k = +e.target.dataset.k, f = e.target.dataset.f; if (!f) return;
+      const rows = this.devRows();
+      if (f === 'mm') { const v = parseFloat(e.target.value); if (!(v > 0)) { this.renderDevScale(); return; } rows[k].mm = v; }
+      else rows[k].color = e.target.value;
+      this.setDevScaleRows(rows);
+    });
+    $('c2bDevScaleEd').addEventListener('click', e => {
+      const d = e.target.closest('[data-del]'); if (!d) return;
+      const rows = this.devRows(); if (rows.length <= 1) return;
+      rows.splice(+d.dataset.del, 1); this.setDevScaleRows(rows);
+    });
+    $('c2bDevAdd').addEventListener('click', () => {
+      const rows = this.devRows(), last = rows[rows.length - 1];
+      rows.push({ mm: last ? +(last.mm * 2).toFixed(1) : 2, color: '#E5C100' }); this.setDevScaleRows(rows);
+    });
+    $('c2bDevDefault').addEventListener('click', () => {
+      const D = C2B.dev.DEFAULT_SCALE;
+      $('c2bDevAbove').value = D.aboveColor; $('c2bDevOut').value = D.outColor; $('c2bDevMax').value = Math.round(D.searchMax * 1000);
+      this.setDevScaleRows(D.classes.map(c => ({ mm: c.max * 1000, color: c.color })));
+    });
+    ['c2bDevAbove', 'c2bDevMax', 'c2bDevOut'].forEach(id => $(id).addEventListener('change', () => this.recolorDev()));
 
     $('c2bColPlace').addEventListener('click', () => {
       if (this.plan.mode === 'column') return this.onPlanModeEnd();

@@ -54,7 +54,7 @@ UI.SETTINGS_KEY = 'bs-c2b-settings';
 UI.SETTING_IDS = ['c2bPreVoxel', 'c2bPreMax', 'c2bVoxel', 'c2bIsoOn', 'c2bIsoR', 'c2bIsoN', 'c2bSpacing', 'c2bCount', 'c2bDepth',
   'c2bAutoOnGen', 'c2bTol', 'c2bSecCell', 'c2bTFloor', 'c2bTWall', 'c2bTCeil', 'c2bWallAng', 'c2bColShape', 'c2bColR', 'c2bColFit',
   'c2bColB', 'c2bColH', 'c2bIfcMat', 'c2bIfcCrs', 'c2bIfcSplit', 'c2bWfInter', 'c2bWfComp', 'c2bWfShow', 'c2bDispMax', 'c2bPtSize',
-  'c2bColorMode', 'c2bInterpN', 'c2bPlKind', 'c2bPlTol', 'c2bPlAuto', 'c2bPlSnap', 'c2bFitSearch', 'c2bBand', 'c2bCompCopyInterp'];
+  'c2bColorMode', 'c2bInterpN', 'c2bPlKind', 'c2bPlTol', 'c2bPlAuto', 'c2bPlSnap', 'c2bDevScale', 'c2bDevAbove', 'c2bDevMax', 'c2bDevOut', 'c2bFitSearch', 'c2bBand', 'c2bCompCopyInterp'];
 UI.loadSettings = () => {
   let s = null;
   try { s = JSON.parse(localStorage.getItem(UI.SETTINGS_KEY) || 'null'); } catch (e) { s = null; }

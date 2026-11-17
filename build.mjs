@@ -5,7 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 
 const ROOT = path.dirname(new URL(import.meta.url).pathname);
-const VERSION = '1.3.0';
+const VERSION = '1.4.0';
 const DATE = '17.11.2026';
 const TOOL = 'Cloud2BIM';
 const rd = p => fs.readFileSync(path.join(ROOT, p), 'utf8');
@@ -56,6 +56,10 @@ Koordinaten intern lokal (x/y abzueglich Ursprung auf 100 m gerundet, Float32), 
 IFC lokal mit IfcMapConversion (Bezugssystem einstellbar, Vorgabe EPSG:2056).
 Mindest-Browser: aktuelles Chrome, Edge oder Firefox (WebGL, WebAssembly).
 
+Aenderungen V1.4.0: Abgleich interpoliertes Modell <-> Punktwolke: Abstand jedes Punkts zur interpolierten
+  Innenflaeche, Einfaerbung nach Farbskala (Stufen und Farben in den Einstellungen anpassbar, Standard
+  <= 2 mm gruen, <= 4 orange, <= 10 rot, <= 20 violett, darueber blau, Suchgrenze 100 mm), Legende mit
+  Anteilen, Kennzahlen, Export als PLY mit Abstand.
 Aenderungen V1.3.0: Querschnitt-Editor mit Mehrfachauswahl (Strg+Klick, Auswahlrechteck mit Shift, Strg+A;
   gemeinsam loeschen und verschieben), Kreisboegen (Anfang, Ende, Bogenpunkt; aus Kante oder Eckenkette,
   in die Punkte eingepasst; Bogenpunkt ziehbar), Schnitttiefe je Querschnitt.
