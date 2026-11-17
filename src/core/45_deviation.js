@@ -12,7 +12,17 @@ C2B.dev = (() => {
     let k = 0;
     const put = i => { const p = V[i]; tris[k++] = p[0]; tris[k++] = p[1]; tris[k++] = p[2]; };
     Q.forEach(([a, b, c, d]) => { put(a); put(b); put(c); put(a); put(c); put(d); });
-    return { tris, n: Q.length * 2 };
+    // Stirnflächen der Übergänge (z. B. Stirnwand) gehören ebenfalls zur gescannten Oberfläche
+    const extra = [];
+    // ganzer Übergangskörper: Stirnflächen und Laibungen der Aussparungen (Durchgänge durch die Wand)
+    C2B.trans.list(project.sections).forEach(({ T }) => {
+      const m = C2B.trans.prismMesh(T);
+      if (m) m.faces.forEach(f => f.forEach(i => extra.push(m.verts[i][0], m.verts[i][1], m.verts[i][2])));
+    });
+    if (!extra.length) return { tris, n: Q.length * 2 };
+    const all = new Float64Array(tris.length + extra.length);
+    all.set(tris); all.set(extra, tris.length);
+    return { tris: all, n: Q.length * 2 + extra.length / 9 };
   }
 
   /** Räumliches Raster: Dreiecke in alle Zellen, die ihre Hülle (± pad) berühren. */

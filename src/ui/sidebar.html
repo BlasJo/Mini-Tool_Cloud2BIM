@@ -101,6 +101,15 @@
             <button class="sidebar-btn sidebar-btn-secondary" id="c2bSecDel" type="button" disabled>Querschnitt löschen</button>
             <button class="sidebar-btn sidebar-btn-secondary" id="c2bSecDelAll" type="button" disabled>Alle löschen</button>
           </div>
+          <div class="c2b-sub">Übergangsquerschnitt</div>
+          <div class="c2b-note">Wo sich der Querschnitt sprunghaft ändert (z. B. zwei Röhren → eine): Körper mit eigener Tiefe, z. B. Stirnwand. Die Interpolation der Nachbarquerschnitte endet an seinen Stirnflächen.</div>
+          <div class="param"><span class="c2b-grow">Station</span><input type="number" id="c2bTrSt" step="0.5"><span class="c2b-unit">m</span></div>
+          <div class="param" title="Ausdehnung des Übergangskörpers entlang der Achse"><span class="c2b-grow">Tiefe</span><input type="number" id="c2bTrDepth" min="1" step="50" value="500"><span class="c2b-unit">mm</span></div>
+          <div class="param"><span class="c2b-grow">Ausrichtung</span><select id="c2bTrAlign"><option value="center">mittig zur Station</option><option value="forward">ab Station vorwärts</option><option value="backward">bis Station rückwärts</option></select></div>
+          <div class="btn-row">
+            <button class="sidebar-btn sidebar-btn-secondary" id="c2bTrAdd" type="button" disabled title="Übergang an der Station auf der Achse einfügen">Bei Station einfügen</button>
+            <button class="sidebar-btn sidebar-btn-secondary" id="c2bTrDraw" type="button" disabled title="Lage des Übergangs als Schnittlinie im Grundriss zeichnen">Im Grundriss zeichnen</button>
+          </div>
         </div>
       </details>
 

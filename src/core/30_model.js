@@ -4,7 +4,7 @@ C2B.model = (() => {
   const DEFAULT_T = { floor: 0.30, wall: 0.30, ceiling: 0.30 };
 
   function validSections(sections) {
-    return sections.filter(s => sec.profilesOf(s).some(p => p.vertices.length >= 2))
+    return sections.filter(s => !C2B.trans.isTrans(s) && sec.profilesOf(s).some(p => p.vertices.length >= 2))
       .slice().sort((a, b) => a.station - b.station);
   }
 
@@ -179,28 +179,57 @@ C2B.model = (() => {
     const names = [];
     S.forEach(s => sec.allComponents(s).forEach(c => { if (!names.includes(c.name)) names.push(c.name); }));
     const solids = [], warnings = [];
+    const cut = C2B.trans.cutter(project.sections, S);
     for (const name of names) {
-      // zusammenhängende Läufe von Querschnitten mit diesem Bauteil
+      // zusammenhängende Läufe von Querschnitten mit diesem Bauteil (nicht über Übergänge hinweg)
       let run = [];
       const flush = () => {
-        if (run.length >= 2) {
-          const pieces = split === 'abschnitt' ? run.slice(0, -1).map((_, i) => run.slice(i, i + 2)) : [run];
-          pieces.forEach((pc, pi) => {
-            const m = Math.max(...pc.map(j => per[j][name].inner.length));
-            if (pc.some(j => per[j][name].inner.length !== m)) warnings.push(`${name}: unterschiedliche Eckenzahl zwischen ${S[pc[0]].name} und ${S[pc[pc.length - 1]].name} – Ecken wurden ergänzt.`);
-            const rings = pc.map(j => ringOf(per[j][name], m));
-            const mesh = loftMesh(pc.map(j => S[j]), rings);
-            const c = per[pc[0]][name].comp;
-            solids.push({ name: pieces.length > 1 ? `${name} [${S[pc[0]].station.toFixed(2)}–${S[pc[pc.length - 1]].station.toFixed(2)}]` : name,
-              baseName: name, type: c.type, stations: [S[pc[0]].station, S[pc[pc.length - 1]].station],
-              thickness: pc.map(j => per[j][name].t), ...mesh });
-          });
-        } else if (run.length === 1) warnings.push(`${name}: nur in einem Querschnitt (${S[run[0]].name}) definiert – kein Körper erzeugt.`);
+        if (!run.length) return;
+        // Rahmen, 2D-Ringe und Stationen des Laufs; an Übergängen bis zur Stirnfläche verlängern/kürzen
+        const F = run.map(j => S[j]), R0 = run.map(j => per[j][name]);
+        const m = Math.max(...R0.map(r => r.inner.length));
+        if (R0.some(r => r.inner.length !== m)) warnings.push(`${name}: unterschiedliche Eckenzahl zwischen ${F[0].name} und ${F[F.length - 1].name} – Ecken wurden ergänzt.`);
+        let R = R0.map(r => ringOf(r, m)), TH = R0.map(r => r.t);
+        let frames = F.slice();
+        if (cut.any) {
+          const fb = cut.faceBefore(F[0].station);
+          if (fb) {
+            const fr = C2B.trans.shifted(F[0], fb.face - F[0].station);
+            if (F[0].station < fb.face) frames[0] = fr;           // liegt im Übergang: auf die Stirnfläche kürzen
+            else { frames.unshift(fr); R.unshift(R[0]); TH.unshift(TH[0]); }
+          }
+          const L = F.length - 1, fa = cut.faceAfter(F[L].station);
+          if (fa) {
+            const fr = C2B.trans.shifted(F[L], fa.face - F[L].station);
+            if (F[L].station > fa.face) frames[frames.length - 1] = fr;
+            else { frames.push(fr); R.push(R[R.length - 1]); TH.push(TH[TH.length - 1]); }
+          }
+        }
+        if (frames.length < 2) { warnings.push(`${name}: nur in einem Querschnitt (${F[0].name}) definiert – kein Körper erzeugt.`); run = []; return; }
+        const idx = frames.map((_, i) => i);
+        const pieces = split === 'abschnitt' ? idx.slice(0, -1).map((_, i) => [i, i + 1]) : [idx];
+        const c = R0[0].comp;
+        pieces.forEach(pc => {
+          const mesh = loftMesh(pc.map(i => frames[i]), pc.map(i => R[i]));
+          const s0 = frames[pc[0]].station, s1 = frames[pc[pc.length - 1]].station;
+          solids.push({ name: pieces.length > 1 ? `${name} [${s0.toFixed(2)}–${s1.toFixed(2)}]` : name,
+            baseName: name, type: c.type, stations: [s0, s1], thickness: pc.map(i => TH[i]), ...mesh });
+        });
         run = [];
       };
-      S.forEach((s, j) => { if (per[j][name]) run.push(j); else flush(); });
+      S.forEach((s, j) => {
+        if (!per[j][name]) { flush(); return; }
+        if (run.length && cut.blocked(S[run[run.length - 1]].station, s.station)) flush();
+        run.push(j);
+      });
       flush();
     }
+    // Übergangskörper (Prismen)
+    cut.transitions.forEach(({ T, r }) => {
+      const mesh = C2B.trans.prismMesh(T);
+      if (!mesh) { warnings.push(`${T.name}: noch keine Fläche definiert – kein Übergangskörper.`); return; }
+      solids.push({ name: T.name, baseName: T.name, type: 'transition', stations: r, thickness: [r[1] - r[0]], transitionId: T.id, ...mesh });
+    });
     return { solids, warnings };
   }
 
@@ -303,7 +332,22 @@ C2B.model = (() => {
     // Teilprofile benachbarter Querschnitte über den Schwerpunkt zuordnen (z. B. zwei Tunnelröhren)
     const centroid = (s, P) => { let u = 0, v = 0; P.vertices.forEach(q => { u += q[0]; v += q[1]; }); const n = P.vertices.length || 1; return sec.uvToWorld(s, [u / n, v / n]); };
     let prevList = [];
+    // Übergänge: Läufe enden an deren Stirnflächen (Anschlussprofil + Längskanten + Fläche)
+    const cut = C2B.trans.cutter(project.sections, S);
+    const extend = (item, face) => {
+      const F = C2B.trans.shifted(item.s, face - item.s.station);
+      const A3 = item.V.map(p => sec.uvToWorld(item.s, p)), B3 = item.V.map(p => sec.uvToWorld(F, p));
+      const m = A3.length;
+      lines.push({ layer: 'C2B_Uebergang_Anschluss', closed: item.closed, pts: B3 });
+      for (let i = 0; i < m; i++) lines.push({ layer: 'C2B_Laengskanten', pts: [A3[i], B3[i]], closed: false });
+      const base = meshV.length;
+      A3.forEach(p => meshV.push(p)); B3.forEach(p => meshV.push(p));
+      const ne = item.closed ? m : m - 1;
+      for (let i = 0; i < ne; i++) { const i1 = (i + 1) % m; meshF.push([base + i, base + i1, base + m + i1, base + m + i]); }
+    };
+    const closeRun = list => list.forEach(q => { const fa = cut.faceAfter(q.s.station); if (fa) extend(q, fa.face); });
     S.forEach(s => {
+      if (prevList.length && cut.blocked(prevList[0].s.station, s.station)) { closeRun(prevList); prevList = []; }
       const cur = [];
       sec.profilesOf(s).forEach(P0 => {
         if (P0.vertices.length < 2) return;
@@ -340,9 +384,21 @@ C2B.model = (() => {
           }
         }
         lines.push({ layer: 'C2B_Profile', closed, pts: V.map(p => sec.uvToWorld(s, p)), name: s.name });
-        cur.push({ s, V, closed, c, used: false });
+        const item = { s, V, closed, c, used: false };
+        if (!prev && cut.any) { const fb = cut.faceBefore(s.station); if (fb) extend(item, fb.face); }
+        cur.push(item);
       });
-      if (cur.length) prevList = cur;
+      if (cur.length) { if (prevList.length && prevList[0].s !== s) closeRun(prevList.filter(q => !q.used)); prevList = cur; }
+    });
+    closeRun(prevList);
+    // Übergangskörper: Umrisse beider Stirnflächen und Längskanten
+    cut.transitions.forEach(({ T }) => {
+      const fp = C2B.trans.facePolys(T), h = fp.length / 2;
+      fp.forEach(f => { lines.push({ layer: 'C2B_Uebergang', closed: true, pts: f.outer }); f.holes.forEach(x => lines.push({ layer: 'C2B_Uebergang', closed: true, pts: x })); });
+      for (let k = 0; k < h; k++) {
+        const a = fp[k], b = fp[k + h];
+        [[a.outer, b.outer]].concat(a.holes.map((x, i) => [x, b.holes[i]])).forEach(([r1, r2]) => r1.forEach((p, i) => lines.push({ layer: 'C2B_Uebergang', closed: false, pts: [p, r2[i]] })));
+      }
     });
     if (includeComponents) {
       const { solids } = buildSolids(project);
@@ -353,6 +409,7 @@ C2B.model = (() => {
       });
       // Längskanten der Aussenseite aus den Volumenkörpern (Ringpunkte der Aussenkontur)
       solids.forEach(so => {
+        if (!so.ringSize) return;
         const m = so.ringSize, half = m / 2;   // Ring = Innenkette (half) + Aussenkette rückwärts (half)
         for (let j = 0; j < so.nRings - 1; j++) for (let i = half; i < m; i++)
           lines.push({ layer: 'C2B_Bauteile_Laengs', closed: false, pts: [so.verts[j * m + i], so.verts[(j + 1) * m + i]] });
@@ -369,6 +426,7 @@ C2B.model = (() => {
     const out = [];
     solids.forEach(so => {
       const m = so.ringSize;
+      if (!m) return;
       for (let j = 0; j < so.nRings - 1; j++) for (let k = 1; k <= perInterval; k++) {
         const t = k / (perInterval + 1), ring = [];
         for (let i = 0; i < m; i++) {

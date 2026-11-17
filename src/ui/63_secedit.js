@@ -78,7 +78,8 @@ UI.SectionEditor = class {
   update() {
     const s = this.sec;
     const P = this.profiles();
-    if (s && P.some(p => p.vertices.length >= 2)) {
+    if (s && C2B.trans.isTrans(s)) { this.report = null; s._dev = null; }
+    else if (s && P.some(p => p.vertices.length >= 2)) {
       const tol = this.app.tol(), band = UI.mm('c2bBand', 0.1);
       this.report = C2B.g2.deviationMulti(this.pts, P, tol, Math.max(band, tol * 1.5));
       s._dev = this.report.max;
@@ -133,6 +134,26 @@ UI.SectionEditor = class {
       ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); ctx.setLineDash([]);
       ctx.fillStyle = '#1f6fb2'; ctx.font = '10px system-ui, sans-serif'; ctx.fillText(l.plane.name, (x1 + x2) / 2 + 4, (y1 + y2) / 2 + 12);
     });
+    // Übergang: Nachbarquerschnitte überlagert und Fläche (mit Aussparungen) gefüllt
+    if (this.overlay) this.overlay.forEach(o => {
+      const col = o.key === 'left' ? '#1f6fb2' : '#E67E22';
+      ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.globalAlpha = 0.5;
+      o.rings.forEach(r => { ctx.beginPath(); r.forEach((p, i) => { const [x, y] = this.toS(p[0], p[1]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.closePath(); ctx.stroke(); });
+      ctx.globalAlpha = 1; ctx.lineWidth = 2; ctx.setLineDash([7, 4]);
+      o.profiles.forEach(P => { const ex = C2B.arc.expand(P); ctx.beginPath(); ex.vertices.forEach((p, i) => { const [x, y] = this.toS(p[0], p[1]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); if (ex.closed) ctx.closePath(); ctx.stroke(); });
+      ctx.setLineDash([]);
+      const p0 = o.profiles[0] && o.profiles[0].vertices[0];
+      if (p0) { const [x, y] = this.toS(p0[0], p0[1]); ctx.fillStyle = col; ctx.font = '11px system-ui, sans-serif'; ctx.fillText(o.sec.name, x + 4, y - 6); }
+    });
+    if (C2B.trans.isTrans(this.sec)) {
+      const A = C2B.trans.areas(this.sec);
+      ctx.fillStyle = 'rgba(94,124,138,0.35)';
+      A.forEach(a => {
+        ctx.beginPath();
+        [a.outer].concat(a.holes).forEach(r => { r.forEach((p, i) => { const [x, y] = this.toS(p[0], p[1]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.closePath(); });
+        ctx.fill('evenodd');
+      });
+    }
     // Teilprofile (Bögen aufgelöst; Farbe je aufgelöster Kante aus der Abweichung)
     const profs = this.profiles();
     profs.forEach((P, k) => {
@@ -148,7 +169,7 @@ UI.SectionEditor = class {
         const [x1, y1] = this.toS(a[0], a[1]), [x2, y2] = this.toS(b[0], b[1]);
         const chainSel = active && this.sel.has(oe) && this.sel.has((oe + 1) % V.length);
         if (selEdges.has(oe) || chainSel) { ctx.save(); ctx.strokeStyle = chainSel ? '#D70036' : '#1f6fb2'; ctx.lineWidth = 6; ctx.globalAlpha = 0.3; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); ctx.restore(); }
-        ctx.strokeStyle = ok[e] === false ? '#D70036' : '#2D8653';
+        ctx.strokeStyle = P.role === 'hole' ? '#8E44AD' : P.role === 'outer' ? '#3D5560' : (ok[e] === false ? '#D70036' : '#2D8653');
         ctx.lineWidth = active ? (oe === this.hoverE ? 3.5 : 2.2) : 1.6;
         if (!active) ctx.setLineDash([6, 3]);
         ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
@@ -174,7 +195,7 @@ UI.SectionEditor = class {
         let u = 0, v = 0; V.forEach(q => { u += q[0]; v += q[1]; });
         const [x, y] = this.toS(u / V.length, v / V.length);
         ctx.fillStyle = active ? '#D70036' : '#8E8E93'; ctx.font = 'bold 13px system-ui, sans-serif'; ctx.textAlign = 'center';
-        ctx.fillText('Profil ' + (k + 1), x, y); ctx.textAlign = 'left';
+        ctx.fillText((P.role === 'hole' ? 'Aussparung ' : P.role === 'outer' ? 'Fläche ' : 'Profil ') + (k + 1), x, y); ctx.textAlign = 'left';
       }
       ctx.globalAlpha = 1;
       if (active) {
@@ -295,6 +316,14 @@ UI.SectionEditor = class {
   }
   _nearestPoint(u, v, rPx = 14) {
     let best = null, bd = (rPx / this.scale) ** 2;
+    if (this.overlay) {   // zuerst Ecken der Nachbarquerschnitte (Profile und Bauteilringe)
+      const test = p => { const d = (p[0] - u) ** 2 + (p[1] - v) ** 2; if (d < bd) { bd = d; best = p; } };
+      this.overlay.forEach(o => {
+        o.profiles.forEach(P => { P.vertices.forEach(test); (P.mids || []).forEach(m => m && test(m)); });
+        o.rings.forEach(r => r.forEach(test));
+      });
+      if (best) return best;
+    }
     for (const p of this.pts) { const d = (p[0] - u) ** 2 + (p[1] - v) ** 2; if (d < bd) { bd = d; best = p; } }
     return best;
   }
@@ -601,7 +630,9 @@ UI.SectionEditor = class {
     const D = this.drawing || [];
     if (D.length < 2) { this.app.setSecTool('edit'); return; }
     this.app.pushUndo();
-    const P = { vertices: D.map(p => p.slice()), closed: closed && D.length >= 3, components: [] };
+    const isT = C2B.trans.isTrans(this.sec);
+    const P = { vertices: D.map(p => p.slice()), closed: (closed || isT) && D.length >= 3, components: [] };
+    if (isT) P.role = this.drawRole || 'outer';
     if (P.closed && C2B.g2.signedArea(P.vertices) < 0) P.vertices.reverse();
     const list = this.profiles();
     list.push(P);

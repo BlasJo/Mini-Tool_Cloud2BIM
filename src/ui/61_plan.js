@@ -113,6 +113,15 @@ UI.PlanView = class {
       const p1 = this.toScreen(f.o[0] - f.u[0] * half, f.o[1] - f.u[1] * half);
       const p2 = this.toScreen(f.o[0] + f.u[0] * half, f.o[1] + f.u[1] * half);
       const cur = s.id === app.curSecId;
+      if (C2B.trans.isTrans(s)) {   // Übergang: Streifen über seine Tiefe
+        const [ra, rb] = C2B.trans.range(s), da = ra - s.station, db = rb - s.station;
+        const q = [[-half, da], [half, da], [half, db], [-half, db]].map(([u, t]) => this.toScreen(f.o[0] + f.u[0] * u + f.d[0] * t, f.o[1] + f.u[1] * u + f.d[1] * t));
+        ctx.fillStyle = cur ? 'rgba(94,124,138,0.55)' : 'rgba(94,124,138,0.35)'; ctx.strokeStyle = cur ? '#D70036' : '#3D5560'; ctx.lineWidth = cur ? 2 : 1;
+        ctx.beginPath(); q.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath(); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = ctx.strokeStyle; ctx.font = (cur ? 'bold ' : '') + '11px system-ui, sans-serif';
+        ctx.fillText('⇄ ' + s.name, q[2][0] + 4, q[2][1] - 4);
+        continue;
+      }
       if (cur) {   // Schnitttiefe als Streifen
         const hd = 0.5 * (s.depth || 0.05);
         const q = [[-half, -hd], [half, -hd], [half, hd], [-half, hd]].map(([u, t]) => this.toScreen(f.o[0] + f.u[0] * u + f.d[0] * t, f.o[1] + f.u[1] * u + f.d[1] * t));

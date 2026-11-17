@@ -2,6 +2,16 @@
 
 Neueste Fassung zuerst.
 
+## 1.5.0 (17.11.2026)
+
+- **Übergangsquerschnitte** (Schritt 4): für Stellen mit sprunghaft wechselndem Querschnitt, z. B. wo zwei Röhren in eine übergehen. Einfügen «bei Station» (auf der Achse) oder «im Grundriss zeichnen»; eigene **Tiefe** entlang der Achse und Ausrichtung (mittig / ab Station vorwärts / bis Station rückwärts).
+- Editor eines Übergangs: die **normalen Nachbarquerschnitte** links (blau) und rechts (orange) werden mit Profilen und Bauteilumrissen **überlagert**. «Fläche vorschlagen»: grösstes Profil einer Seite = Fläche, die Profile der anderen Seite darin = Aussparungen (zwei Röhren → Stirnwand mit zwei Öffnungen). Flächen und Aussparungen lassen sich zeichnen (Shift fängt an Ecken der Nachbarquerschnitte) und wie Profile bearbeiten (Ecken, Mehrfachauswahl, Bögen); Art je Teilprofil umschaltbar.
+- **Verschnitt der Interpolation**: Läufe normaler Querschnitte gehen nicht durch einen Übergang, sondern enden an dessen Stirnflächen (verlängert oder, falls ein Querschnitt im Übergang liegt, darauf gekürzt) – für Volumenkörper, Drahtmodell (Anschlussprofile, Layer `C2B_Uebergang`) und Abgleich.
+- Übergangskörper als geschlossenes Prisma mit Aussparungen (berührende Aussparungen sauber verschweisst), IFC als `IfcWall` «Übergangswand» mit Tiefe/Stationen/Volumen.
+- Serienvorschlag robuster bei wechselnder Topologie: Vorlagen mit offenen (zerrissenen) Profilen werden nicht weitergegeben; ein sauberer eigener Vorschlag schlägt eine Vorlage, die nur einen Teil der Punkte erklärt (Abdeckung).
+- Neu eingebettet: earcut 2.2.4 (ISC) für Flächen mit Aussparungen.
+- Beispiel `beispiel/Demo_Verzweigung.laz` (zwei Röhren → eine Röhre, Stirnwand 8.0–8.5; Achse E 2601500 / N 1200500 → E 2601518 / N 1200500).
+
 ## 1.4.0 (17.11.2026)
 
 - **Abgleich Modell ↔ Punktwolke** (Schritt 5): Für jeden angezeigten Punkt wird der kürzeste Abstand zur interpolierten Innenfläche berechnet (gleiche Interpolation wie Volumenkörper/Drahtmodell, Bögen aufgelöst; räumliches Raster, ca. 0.4 s für 400'000 Punkte). Die Punktwolke wird in 3D und im Grundriss nach einer Farbskala eingefärbt; Legende mit Anteilen je Stufe, Mittel, Median, 95 %. Volumenkörper/Flächen werden dazu im 3D ausgeblendet (Schalter oben).

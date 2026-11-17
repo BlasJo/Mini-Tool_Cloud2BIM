@@ -7,7 +7,7 @@ UI.fmtInt = n => Math.round(n).toLocaleString('de-CH');
 UI.fmtM = (x, d = 3) => (x === null || x === undefined || !isFinite(x)) ? '–' : x.toFixed(d);
 UI.fmtMM = x => (x === null || x === undefined || !isFinite(x)) ? '–' : (x * 1000).toFixed(1) + ' mm';
 
-UI.TYPE_COLOR = { floor: '#7A8696', wall: '#C29A5B', ceiling: '#4F86B8', column: '#D70036' };
+UI.TYPE_COLOR = { floor: '#7A8696', wall: '#C29A5B', ceiling: '#4F86B8', column: '#D70036', transition: '#5E7C8A' };
 UI.TYPE_LABEL = { floor: 'Bodenplatte', wall: 'Wand', ceiling: 'Decke' };
 
 UI.MAX_LOG_LINES = 400;

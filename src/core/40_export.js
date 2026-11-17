@@ -58,6 +58,7 @@ C2B.exp = (() => {
     wall: { cls: 'IFCWALL', pre: '.SOLIDWALL.', label: 'Wand', color: [0.80, 0.78, 0.74] },
     ceiling: { cls: 'IFCSLAB', pre: '.FLOOR.', label: 'Decke', color: [0.70, 0.72, 0.78] },
     column: { cls: 'IFCCOLUMN', pre: '.COLUMN.', label: 'Stütze', color: [0.84, 0.0, 0.21] },
+    transition: { cls: 'IFCWALL', pre: '.SOLIDWALL.', label: 'Übergangswand', color: [0.37, 0.49, 0.54] },
   };
 
   /**
@@ -140,7 +141,9 @@ C2B.exp = (() => {
       const el = w.add(`${t.cls}('${ifcGuid()}',$,${str(so.name)},$,${str(t.label)},${elPl},${pds},$,${t.pre})`);
       elements.push(el); byMaterial.push(el);
       const tmin = Math.min(...so.thickness), tmax = Math.max(...so.thickness);
-      props(el, [['Bauteiltyp', 'S', t.label], ['Dicke_min', 'L', tmin], ['Dicke_max', 'L', tmax],
+      if (so.type === 'transition') props(el, [['Bauteiltyp', 'S', t.label], ['Tiefe', 'L', so.thickness[0]],
+        ['Station_von', 'L', so.stations[0]], ['Station_bis', 'L', so.stations[1]], ['Volumen', 'V', so.volume], ['Quelle', 'S', 'Punktwolke (Cloud2BIM), Übergangsquerschnitt']]);
+      else props(el, [['Bauteiltyp', 'S', t.label], ['Dicke_min', 'L', tmin], ['Dicke_max', 'L', tmax],
         ['Station_von', 'L', so.stations[0]], ['Station_bis', 'L', so.stations[1]], ['Volumen', 'V', so.volume],
         ['Quelle', 'S', 'Punktwolke (Cloud2BIM)']]);
       report.count[t.label] = (report.count[t.label] || 0) + 1;
@@ -186,7 +189,7 @@ C2B.exp = (() => {
   function buildDxf(lines, offset = [0, 0, 0]) {
     const out = ['0', 'SECTION', '2', 'HEADER', '9', '$ACADVER', '1', 'AC1009', '9', '$INSUNITS', '70', '6', '0', 'ENDSEC'];
     const layers = [...new Set(lines.map(l => l.layer))];
-    const colors = { C2B_Profile: 1, C2B_Laengskanten: 5, C2B_Zwischenprofile: 8, C2B_Bauteile_Aussen: 3, C2B_Bauteile_Laengs: 4 };
+    const colors = { C2B_Profile: 1, C2B_Laengskanten: 5, C2B_Zwischenprofile: 8, C2B_Bauteile_Aussen: 3, C2B_Bauteile_Laengs: 4, C2B_Uebergang: 6, C2B_Uebergang_Anschluss: 1 };
     out.push('0', 'SECTION', '2', 'TABLES', '0', 'TABLE', '2', 'LAYER', '70', String(layers.length));
     layers.forEach(l => out.push('0', 'LAYER', '2', l, '70', '0', '62', String(colors[l] || 7), '6', 'CONTINUOUS'));
     out.push('0', 'ENDTAB', '0', 'ENDSEC', '0', 'SECTION', '2', 'ENTITIES');

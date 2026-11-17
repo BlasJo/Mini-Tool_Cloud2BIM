@@ -85,6 +85,22 @@
             <span class="c2b-mute" id="c2bEdgeSel" style="font-size:11px"></span>
           </div>
         </div>
+        <div class="c2b-comp" id="c2bTrPanel" hidden>
+          <div class="c2b-comp-bar" style="border-top:none">
+            <b style="font-size:12px">Übergang</b>
+            <label>Name <input type="text" id="c2bTrName" style="width:140px"></label>
+            <label>Tiefe <input type="number" id="c2bTrDepthSec" min="1" step="50" style="width:70px"> mm</label>
+            <label><select id="c2bTrAlignSec"><option value="center">mittig</option><option value="forward">vorwärts</option><option value="backward">rückwärts</option></select></label>
+            <label title="Art des aktiven Teilprofils">Profil ist <select id="c2bTrRole"><option value="outer">Fläche</option><option value="hole">Aussparung</option></select></label>
+          </div>
+          <div class="c2b-comp-bar">
+            <button type="button" class="c2b-btn c2b-btn--red" id="c2bTrSuggest" title="Fläche aus den Nachbarquerschnitten: grösseres Profil = Fläche, die Profile der anderen Seite darin = Aussparungen">Fläche vorschlagen</button>
+            <button type="button" class="c2b-btn" id="c2bTrDrawOuter" title="Fläche als Polygon zeichnen (Shift = an Ecken der Nachbarquerschnitte bzw. Punkte fangen)">Fläche zeichnen</button>
+            <button type="button" class="c2b-btn" id="c2bTrDrawHole" title="Aussparung (Öffnung) als Polygon zeichnen">Aussparung zeichnen</button>
+            <span class="c2b-mute" id="c2bTrInfo" style="font-size:11px"></span>
+          </div>
+          <div class="c2b-help" style="border-top:none">Überlagert: <span style="color:#1f6fb2">━ links (davor)</span> · <span style="color:#E67E22">━ rechts (danach)</span> · Fläche <span style="color:#5E7C8A">■</span>. Ecken wie gewohnt ziehen, Bögen und Mehrfachauswahl möglich.</div>
+        </div>
         <div class="c2b-help" id="c2bSecHelp" hidden>
           <span class="c2b-kbd">Mausrad</span> Zoom · <span class="c2b-kbd">Ziehen</span> verschieben ·
           <span class="c2b-kbd">Doppelklick</span> Ecke einfügen · <span class="c2b-kbd">Entf</span>/<span class="c2b-kbd">Rechtsklick</span> Ecke löschen ·

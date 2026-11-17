@@ -261,7 +261,26 @@ C2B.g2 = (() => {
     return tris;
   }
 
-  return { edges, edgeCount, distPointSeg, distancesToPolyline, deviationReport, deviationMulti, douglasPeucker,
+  /** Polygon mit Löchern triangulieren (earcut). Liefert { pts: [[x,y]...], tris: [[i,j,k]...] }. */
+  function triangulateHoles(outer, holes = []) {
+    const pts = outer.concat(...holes);
+    const flat = [];
+    pts.forEach(p => flat.push(p[0], p[1]));
+    const hi = [];
+    let k = outer.length;
+    holes.forEach(h => { hi.push(k); k += h.length; });
+    const ix = earcut(flat, hi.length ? hi : null, 2);
+    const tris = [];
+    for (let i = 0; i < ix.length; i += 3) {
+      // einheitlich gegen den Uhrzeigersinn (earcut garantiert keine Orientierung)
+      const a = pts[ix[i]], b = pts[ix[i + 1]], c = pts[ix[i + 2]];
+      const cr = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+      tris.push(cr >= 0 ? [ix[i], ix[i + 1], ix[i + 2]] : [ix[i], ix[i + 2], ix[i + 1]]);
+    }
+    return { pts, tris };
+  }
+
+  return { triangulateHoles, edges, edgeCount, distPointSeg, distancesToPolyline, deviationReport, deviationMulti, douglasPeucker,
     fitLine, intersectLines, projectOnLine, signedArea, polylineLength, resample, densify,
     rightNormal, triangulate };
 })();

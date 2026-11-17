@@ -272,6 +272,49 @@ await step('Abgleich Modell ↔ Punktwolke (Gewölbe)', async () => {
   await page.click('#c2bTabPlan'); await page.waitForTimeout(200);
   await page.screenshot({ path: path.join(out, 'e2e_12_abgleich_grundriss.png') });
 });
+await step('Übergang: zwei Röhren → eine Röhre (Stirnwand)', async () => {
+  await page.setInputFiles('#c2bFile', path.join(root, 'beispiel/Demo_Verzweigung.laz'));
+  await page.click('.bs-dialog .bs-btn--red');
+  await page.waitForFunction(() => window.BSTool.APP.project.source === 'Demo_Verzweigung.laz' && window.BSTool.APP.raw, null, { timeout: 120000 });
+  await page.click('#c2bThin'); await page.waitForTimeout(400);
+  await page.evaluate(() => { document.getElementById('c2bStep4').open = true; });
+  await page.fill('#c2bAxS_E', '2601500'); await page.fill('#c2bAxS_N', '1200500');
+  await page.fill('#c2bAxE_E', '2601518'); await page.fill('#c2bAxE_N', '1200500');
+  await page.click('#c2bModeSpacing'); await page.fill('#c2bSpacing', '3'); await page.fill('#c2bDepth', '50');
+  await page.click('#c2bGen');
+  await page.waitForFunction(() => window.BSTool.APP.project.sections.length === 7 && window.BSTool.APP.project.sections.every(s => s.profiles.length), null, { timeout: 60000 });
+  console.log('   Querschnitte:', JSON.stringify(await page.evaluate(() => window.BSTool.APP.sortedSecs().map(s => s.name + ':' + s.profiles.map(p => p.vertices.length).join('+')))));
+
+  await page.click('#c2bCompAutoAll');
+  // Übergang bei Station 8.25, Tiefe 500 mm mittig -> 8.0 .. 8.5
+  await page.fill('#c2bTrSt', '8.25'); await page.fill('#c2bTrDepth', '500'); await page.selectOption('#c2bTrAlign', 'center');
+  await page.click('#c2bTrAdd');
+  await page.waitForFunction(() => { const T = window.BSTool.APP.curSec(); return T && T.kind === 'transition' && T.profiles.length; });
+  const tr = await page.evaluate(() => { const A = window.BSTool.APP, C = window.BSTool.C2B, T = A.curSec(); return { roles: T.profiles.map(p => p.role), area: C.trans.areaOf(T), nb: C.trans.neighbors(A.project.sections, T) && [C.trans.neighbors(A.project.sections, T).left.name, C.trans.neighbors(A.project.sections, T).right.name] }; });
+  console.log('   Übergang:', JSON.stringify(tr));
+  if (tr.roles.filter(r => r === 'hole').length !== 2 || Math.abs(tr.area - 16) > 0.3) throw new Error('Fläche Übergang');
+  await page.screenshot({ path: path.join(out, 'e2e_13_uebergang_editor.png') });
+  await page.click('#c2bBuild');
+  await page.waitForFunction(() => window.BSTool.APP.solids && window.BSTool.APP.solids.some(s => s.type === 'transition'), null, { timeout: 10000 });
+  const sol = await page.evaluate(() => window.BSTool.APP.solids.map(s => [s.name, s.stations.map(x => +x.toFixed(2)).join('–'), +s.volume.toFixed(2)]));
+  console.log('   Körper:', JSON.stringify(sol));
+  const bad = sol.filter(([n, st]) => n !== 'Übergang 8.25' && !(st.endsWith('–8') || st.startsWith('8.5–')));
+  if (bad.length) throw new Error('Läufe nicht an den Stirnflächen: ' + JSON.stringify(bad));
+  await page.click('#c2bTab3d');
+  for (const id of ['#c2bShowCloud']) if (await page.$eval(id, b => b.getAttribute('aria-pressed')) === 'true') await page.click(id);
+  for (const id of ['#c2bShowModel', '#c2bShowAreas']) if (await page.$eval(id, b => b.getAttribute('aria-pressed')) !== 'true') await page.click(id);
+  await page.evaluate(() => { const v = window.BSTool.APP.v3d, o = window.BSTool.APP.project.offset; const c = [1508.5 - (o[0] - 2600000), 1200500 - o[1], 452];
+    v.controls.target.set(c[0], c[1], c[2]); v.camera.position.set(c[0] + 9, c[1] - 11, c[2] + 7); v.controls.update(); v.render(); });
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: path.join(out, 'e2e_14_uebergang_3d.png'), clip: { x: 300, y: 68, width: 650, height: 850 } });
+  await page.evaluate(() => { document.getElementById('c2bStep5').open = true; });
+  await page.click('#c2bDevRun');
+  await page.waitForFunction(() => window.BSTool.APP.dev && window.BSTool.APP.dev.res, null, { timeout: 60000 });
+  const r = await page.evaluate(() => { const d = window.BSTool.APP.dev; return { mean: d.res.mean, p95: d.res.p95, out: d.res.nOut / d.dist.length }; });
+  console.log('   Abgleich:', JSON.stringify({ mean_mm: +(r.mean * 1000).toFixed(2), p95_mm: +(r.p95 * 1000).toFixed(2), ausserhalb: +(r.out * 100).toFixed(1) + ' %' }));
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#c2bExpIfc')]);
+  await dl.saveAs(path.join(out, 'verzweigung.ifc'));
+});
 console.log('--- Log ---\n' + (await log()));
 await browser.close();
 if (errors.length) { console.log('FEHLER:\n' + errors.join('\n')); process.exit(1); }

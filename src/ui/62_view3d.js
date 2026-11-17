@@ -120,8 +120,17 @@ UI.View3D = class {
         if (ex.closed) pts.push(pts[0].clone());
         this.groups.sections.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: cur ? 0xD70036 : 0x2D8653 })));
       });
+      // Übergang: Fläche (mit Aussparungen) an der Station
+      if (showAreas && C2B.trans.isTrans(s)) C2B.trans.areas(s).forEach(ar => {
+        const tri = C2B.g2.triangulateHoles(ar.outer, ar.holes);
+        if (!tri.tris.length) return;
+        const pos = new Float32Array(tri.tris.length * 9);
+        tri.tris.forEach((t, i) => t.forEach((vi, k) => pos.set(C2B.sec.uvToWorld(s, tri.pts[vi]), i * 9 + k * 3)));
+        const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        this.groups.areas.add(new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: new THREE.Color(UI.TYPE_COLOR.transition), side: THREE.DoubleSide, transparent: true, opacity: cur ? 0.95 : 0.8, depthWrite: false })));
+      });
       // Bauteilflächen
-      if (showAreas && tmap) {
+      if (showAreas && tmap && !C2B.trans.isTrans(s)) {
         const rings = C2B.model.sectionRings(s, tmap.get(s.id) || {});
         Object.values(rings).forEach(r => {
           const poly = r.inner.concat(r.outer.slice().reverse());
@@ -188,7 +197,7 @@ UI.View3D = class {
   setWire(lines) {
     this._clear(this.groups.wire);
     if (!lines || !lines.length) return this.render();
-    const col = { C2B_Profile: 0xD70036, C2B_Laengskanten: 0x1f6fb2, C2B_Zwischenprofile: 0x8E8E93, C2B_Bauteile_Aussen: 0x2D8653, C2B_Bauteile_Laengs: 0x2D8653 };
+    const col = { C2B_Profile: 0xD70036, C2B_Laengskanten: 0x1f6fb2, C2B_Zwischenprofile: 0x8E8E93, C2B_Bauteile_Aussen: 0x2D8653, C2B_Bauteile_Laengs: 0x2D8653, C2B_Uebergang: 0x3D5560, C2B_Uebergang_Anschluss: 0xD70036 };
     const by = {};
     lines.forEach(l => {
       const arr = by[l.layer] = by[l.layer] || [];

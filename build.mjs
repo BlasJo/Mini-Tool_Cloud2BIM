@@ -5,7 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 
 const ROOT = path.dirname(new URL(import.meta.url).pathname);
-const VERSION = '1.4.0';
+const VERSION = '1.5.0';
 const DATE = '17.11.2026';
 const TOOL = 'Cloud2BIM';
 const rd = p => fs.readFileSync(path.join(ROOT, p), 'utf8');
@@ -18,6 +18,7 @@ const LIBS = [
   { file: 'vendor/three.min.js', name: 'three.min.js 0.147.0 (classic build)', lic: 'MIT, (c) 2010-2022 three.js authors', src: 'npm three@0.147.0/build/three.min.js' },
   { file: 'vendor/OrbitControls.js', name: 'OrbitControls.js 0.147.0 (examples/js)', lic: 'MIT, (c) three.js authors', src: 'npm three@0.147.0/examples/js/controls/OrbitControls.js' },
   { file: 'vendor/delaunator.min.js', name: 'delaunator.min.js 5.0.1', lic: 'ISC, (c) Mapbox / Vladimir Agafonkin', src: 'npm delaunator@5.0.1/delaunator.min.js' },
+  { file: 'vendor/earcut.min.js', name: 'earcut.min.js 2.2.4', lic: 'ISC, (c) Mapbox', src: 'npm earcut@2.2.4/dist/earcut.min.js' },
   { file: 'vendor/laz-perf.js', name: 'laz-perf.js 0.0.7 (web)', lic: 'Apache-2.0, (c) Hobu Inc.', src: 'npm laz-perf@0.0.7/lib/web/laz-perf.js' },
   { file: 'vendor/laz-perf.wasm', name: 'laz-perf.wasm 0.0.7 (base64)', lic: 'Apache-2.0, (c) Hobu Inc.', src: 'npm laz-perf@0.0.7/lib/web/laz-perf.wasm' },
 ];
@@ -56,6 +57,10 @@ Koordinaten intern lokal (x/y abzueglich Ursprung auf 100 m gerundet, Float32), 
 IFC lokal mit IfcMapConversion (Bezugssystem einstellbar, Vorgabe EPSG:2056).
 Mindest-Browser: aktuelles Chrome, Edge oder Firefox (WebGL, WebAssembly).
 
+Aenderungen V1.5.0: Uebergangsquerschnitte (z. B. Stirnwand, wo zwei Roehren in eine uebergehen): eigene Tiefe
+  und Ausrichtung, Flaeche aus den ueberlagerten Nachbarquerschnitten vorgeschlagen oder gezeichnet
+  (Flaeche/Aussparung, Fangen an Nachbarecken), Prisma als IfcWall; die Interpolation der normalen
+  Querschnitte endet an den Stirnflaechen (Volumen, Drahtmodell, Abgleich). earcut eingebettet.
 Aenderungen V1.4.0: Abgleich interpoliertes Modell <-> Punktwolke: Abstand jedes Punkts zur interpolierten
   Innenflaeche, Einfaerbung nach Farbskala (Stufen und Farben in den Einstellungen anpassbar, Standard
   <= 2 mm gruen, <= 4 orange, <= 10 rot, <= 20 violett, darueber blau, Suchgrenze 100 mm), Legende mit
